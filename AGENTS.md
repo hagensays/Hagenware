@@ -69,7 +69,7 @@ For every upgrade:
 5. Open a PR into `main`.
 6. CI must pass before merge.
 7. Never bypass or weaken CI.
-8. Auto-merge may merge once CI passes.
+8. Enable auto-merge. GitHub merges once CI passes.
 
 Never develop a release directly on `main`.
 

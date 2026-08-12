@@ -35,7 +35,8 @@ bool IsProgrammedKey(SurfaceKind surface, DWORD virtual_key) {
             virtual_key == VK_RIGHT ||
             virtual_key == VK_DOWN ||
             virtual_key == VK_SPACE ||
-            virtual_key == VK_ESCAPE;
+            virtual_key == VK_ESCAPE ||
+            (virtual_key >= '1' && virtual_key <= '9');
     }
 
     if (surface == SurfaceKind::Grid) {
@@ -201,12 +202,8 @@ void CALLBACK WindowEventProc(
     }
 
     if (event == EVENT_OBJECT_SHOW) {
-        if (IsWindowVisible(window) != FALSE) {
-            StartInputHooks(window, surface);
-        }
-    } else if (event == EVENT_OBJECT_HIDE &&
-        window == g_surfaceWindow &&
-        IsWindowVisible(window) == FALSE) {
+        StartInputHooks(window, surface);
+    } else if (event == EVENT_OBJECT_HIDE && window == g_surfaceWindow) {
         StopInputHooks();
     }
 }

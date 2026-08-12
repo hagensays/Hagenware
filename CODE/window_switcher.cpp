@@ -24,6 +24,7 @@ struct WindowEntry {
 
 HINSTANCE g_instance = nullptr;
 HWND g_window = nullptr;
+HWND g_returnWindow = nullptr;
 std::vector<WindowEntry> g_entries;
 int g_selected = 0;
 int g_firstVisible = 0;
@@ -381,7 +382,7 @@ LRESULT CALLBACK SwitcherWindowProc(HWND window, UINT message, WPARAM wparam, LP
             ActivateSelected();
             return 0;
         case VK_ESCAPE:
-            WindowSwitcher::Hide();
+            WindowSwitcher::DismissForPassThrough();
             return 0;
         default:
             break;
@@ -393,10 +394,11 @@ LRESULT CALLBACK SwitcherWindowProc(HWND window, UINT message, WPARAM wparam, LP
         }
         return 0;
     case WM_CLOSE:
-        WindowSwitcher::Hide();
+        WindowSwitcher::DismissForPassThrough();
         return 0;
     case WM_DESTROY:
         ClearEntries();
+        g_returnWindow = nullptr;
         return 0;
     default:
         break;
@@ -457,6 +459,7 @@ void Show() {
         return;
     }
 
+    g_returnWindow = foreground;
     g_selected = 0;
     g_firstVisible = 0;
     for (size_t i = 0; i < g_entries.size(); ++i) {
@@ -485,10 +488,17 @@ void Hide() {
         ShowWindow(g_window, SW_HIDE);
     }
     ClearEntries();
+    g_returnWindow = nullptr;
     g_selected = 0;
     g_firstVisible = 0;
     g_visibleCount = 0;
     g_hiding = false;
+}
+
+void DismissForPassThrough() {
+    HWND target = g_returnWindow;
+    Hide();
+    ActivateWindow(target);
 }
 
 void Shutdown() {

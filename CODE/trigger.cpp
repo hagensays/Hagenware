@@ -11,9 +11,9 @@ HHOOK g_hook = nullptr;
 HWND g_targetWindow = nullptr;
 UINT g_shiftTriggerMessage = 0;
 UINT g_controlTriggerMessage = 0;
-bool g_enabled = true;
 ModifierTrigger g_candidate = ModifierTrigger::None;
 DWORD g_candidateScanCode = 0;
+ModifierTrigger g_suppressed = ModifierTrigger::None;
 
 bool IsShiftKey(DWORD virtual_key) {
     return virtual_key == VK_SHIFT || virtual_key == VK_LSHIFT || virtual_key == VK_RSHIFT;
@@ -56,11 +56,18 @@ void PostTrigger(ModifierTrigger trigger) {
 }
 
 LRESULT CALLBACK KeyboardHookProc(int code, WPARAM wparam, LPARAM lparam) {
-    if (code == HC_ACTION && g_enabled) {
+    if (code == HC_ACTION) {
         const auto* key = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lparam);
         const bool key_down = wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN;
         const bool key_up = wparam == WM_KEYUP || wparam == WM_SYSKEYUP;
         const ModifierTrigger modifier = ModifierForKey(key->vkCode);
+
+        if (g_suppressed != ModifierTrigger::None) {
+            if (key_up && modifier == g_suppressed) {
+                g_suppressed = ModifierTrigger::None;
+            }
+            return CallNextHookEx(nullptr, code, wparam, lparam);
+        }
 
         if (key_down) {
             if (g_candidate == ModifierTrigger::None) {
@@ -94,7 +101,6 @@ bool Start(HWND target_window, UINT shift_trigger_message, UINT control_trigger_
     g_targetWindow = target_window;
     g_shiftTriggerMessage = shift_trigger_message;
     g_controlTriggerMessage = control_trigger_message;
-    g_enabled = true;
     g_hook = SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardHookProc, GetModuleHandleW(nullptr), 0);
 
     if (g_hook == nullptr) {
@@ -107,9 +113,14 @@ bool Start(HWND target_window, UINT shift_trigger_message, UINT control_trigger_
     return true;
 }
 
-void SetEnabled(bool enabled) {
-    g_enabled = enabled;
+void SuppressModifierUntilRelease(DWORD virtual_key) {
+    const ModifierTrigger modifier = ModifierForKey(virtual_key);
+    if (modifier == ModifierTrigger::None) {
+        return;
+    }
+
     CancelCandidate();
+    g_suppressed = modifier;
 }
 
 void Stop() {
@@ -121,8 +132,8 @@ void Stop() {
     g_targetWindow = nullptr;
     g_shiftTriggerMessage = 0;
     g_controlTriggerMessage = 0;
-    g_enabled = true;
     CancelCandidate();
+    g_suppressed = ModifierTrigger::None;
 }
 
 } // namespace Trigger

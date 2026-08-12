@@ -4,14 +4,14 @@ This file is the authoritative rule set for Hagenware.
 
 ## Stack
 
-- Windows only.
+- Windows only; x64 only unless explicitly approved otherwise.
 - C++ + raw Win32 only.
 - No frameworks.
 - No third-party runtime dependencies without explicit approval.
 - Assume only a clean supported Windows installation and Windows system components are available.
 - Release builds should use `/MT`.
 - Prefer one self-contained `.exe`.
-- If Windows already provides the functionality, use Windows.
+- Use Windows facilities when Windows already provides the functionality.
 - All source code and project files belong in `CODE/`.
 
 ## Code
@@ -19,6 +19,19 @@ This file is the authoritative rule set for Hagenware.
 Keep the codebase simple, native, lean, and easy for another AI agent to understand.
 
 A lean codebase does not mean minimizing lines of code. Use as many lines as needed for clear, maintainable, explicit code while avoiding unnecessary code, abstractions, dependencies, metaprogramming, generated architecture, and unrelated refactors.
+
+- Prefer local, explicit state; avoid hidden globals, unnecessary singletons, and complicated shared mutable state.
+- Use Unicode Win32 APIs (`...W`) consistently.
+- Prefer event-driven Win32 messages, notifications, waits, and callbacks over polling.
+- Idle means idle: avoid unnecessary threads, timers, polling, CPU use, disk access, and network activity.
+- Run as a normal user. Do not require elevation unless the requested feature fundamentally needs it.
+- No telemetry, update checks, or unsolicited network access unless explicitly requested.
+- Do not create registry keys, AppData files, configs, caches, logs, databases, or other persistent state unless the feature needs them.
+- Do not add speculative features or architecture. New services, updaters, IPC, persistence layers, networking, or similar subsystems require a concrete need.
+- Prefer Windows facilities before custom implementations, but do not contort clear code merely to reduce line count.
+- Fail cleanly: do not corrupt state, leak resources, or leave orphaned processes when an operation fails.
+- Do not guess compatibility requirements. Windows support targets must be explicit; do not add compatibility hacks for unspecified or unsupported versions.
+- Keep each version focused and reviewable; do not bundle unrelated refactors with a requested change.
 
 ## Version Workflow
 

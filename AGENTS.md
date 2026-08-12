@@ -34,6 +34,25 @@ A lean codebase does not mean minimizing lines of code. Use as many lines as nee
 - Do not guess compatibility requirements. Windows support targets must be explicit; do not add compatibility hacks for unspecified or unsupported versions.
 - Keep each version focused and reviewable; do not bundle unrelated refactors with a requested change.
 
+## Development Speed
+
+Development speed is one of the biggest wins of the current setup.
+
+The speed comes from several choices lining up:
+
+- tiny native C++ codebase
+- raw Win32, no framework restore/build step
+- no package manager
+- no dependency graph
+- no generated project layers
+- one x64 Release build
+- very small CI surface
+- focused version branches
+- small PRs
+- automatic release packaging
+
+Preserve development speed as a design objective. Avoid architecture or build choices that materially slow down iteration unless they buy something genuinely important.
+
 ## Version Workflow
 
 Every release uses a branch named exactly:

@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "lifecycle.h"
+
 namespace {
 constexpr wchar_t kDeckClassName[] = L"HagenwareDeck";
 constexpr int kPadding = 12;
@@ -17,7 +19,7 @@ constexpr int kPreviewHeight = 108;
 constexpr int kMonitorMargin = 40;
 constexpr int kSelectionThickness = 3;
 constexpr int kMaxNumberedCards = 9;
-constexpr BYTE kThumbnailOpacity = 224;
+constexpr BYTE kNumberedThumbnailOpacity = 224;
 
 struct WindowEntry {
     HWND window = nullptr;
@@ -36,9 +38,16 @@ int g_selected = 0;
 int g_firstVisible = 0;
 int g_visibleCount = 0;
 bool g_hiding = false;
+bool g_activityActive = false;
 
 bool IsCandidateWindow(HWND window) {
     if (window == nullptr || window == g_window || window == GetShellWindow() || IsWindowVisible(window) == FALSE) {
+        return false;
+    }
+
+    DWORD process_id = 0;
+    GetWindowThreadProcessId(window, &process_id);
+    if (process_id == GetCurrentProcessId()) {
         return false;
     }
 
@@ -246,7 +255,7 @@ void UpdateThumbnailLayout() {
             DWM_TNP_OPACITY |
             DWM_TNP_SOURCECLIENTAREAONLY;
         properties.rcDestination = destination;
-        properties.opacity = kThumbnailOpacity;
+        properties.opacity = index < kMaxNumberedCards ? kNumberedThumbnailOpacity : 255;
         properties.fVisible = TRUE;
         properties.fSourceClientAreaOnly = FALSE;
         DwmUpdateThumbnailProperties(entry.thumbnail, &properties);
@@ -352,6 +361,17 @@ void ActivateVisibleSlot(int slot) {
     ActivateSelected();
 }
 
+void ActivateNumberedEntry(int number_index) {
+    if (number_index < 0 ||
+        number_index >= kMaxNumberedCards ||
+        number_index >= static_cast<int>(g_entries.size())) {
+        return;
+    }
+
+    g_selected = number_index;
+    ActivateSelected();
+}
+
 void ActivateCardAtPoint(POINT point) {
     for (int slot = 0; slot < g_visibleCount; ++slot) {
         RECT card = CardRect(slot);
@@ -362,13 +382,13 @@ void ActivateCardAtPoint(POINT point) {
     }
 }
 
-void DrawCardNumber(HDC dc, int slot) {
-    if (g_numberFont == nullptr || slot < 0 || slot >= kMaxNumberedCards) {
+void DrawCardNumber(HDC dc, int slot, int entry_index) {
+    if (g_numberFont == nullptr || entry_index < 0 || entry_index >= kMaxNumberedCards) {
         return;
     }
 
     wchar_t number[2]{
-        static_cast<wchar_t>(L'1' + slot),
+        static_cast<wchar_t>(L'1' + entry_index),
         L'\0'};
 
     RECT number_rect = PreviewBounds(slot);
@@ -418,7 +438,7 @@ void PaintDeck(HWND window) {
             }
         }
 
-        DrawCardNumber(dc, slot);
+        DrawCardNumber(dc, slot, index);
         SetTextColor(dc, RGB(0, 0, 0));
 
         RECT title_rect{
@@ -463,9 +483,6 @@ void PositionDeck(HWND anchor) {
     if (max_visible < 1) {
         max_visible = 1;
     }
-    if (max_visible > kMaxNumberedCards) {
-        max_visible = kMaxNumberedCards;
-    }
 
     const int entry_count = static_cast<int>(g_entries.size());
     g_visibleCount = entry_count < max_visible ? entry_count : max_visible;
@@ -507,7 +524,7 @@ LRESULT CALLBACK DeckWindowProc(HWND window, UINT message, WPARAM wparam, LPARAM
         return 1;
     case WM_KEYDOWN:
         if (wparam >= L'1' && wparam <= L'9') {
-            ActivateVisibleSlot(static_cast<int>(wparam - L'1'));
+            ActivateNumberedEntry(static_cast<int>(wparam - L'1'));
             return 0;
         }
 
@@ -664,6 +681,11 @@ void Show() {
     g_firstVisible = 0;
     SelectPreviousWindow(foreground);
 
+    if (!g_activityActive) {
+        Lifecycle::BeginActivity();
+        g_activityActive = true;
+    }
+
     PositionDeck(foreground);
     EnsureSelectedVisible();
     UpdateWindow(g_window);
@@ -687,6 +709,12 @@ void Hide() {
     g_selected = 0;
     g_firstVisible = 0;
     g_visibleCount = 0;
+
+    if (g_activityActive) {
+        g_activityActive = false;
+        Lifecycle::EndActivity();
+    }
+
     g_hiding = false;
 }
 

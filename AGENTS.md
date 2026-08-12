@@ -73,6 +73,13 @@ For every upgrade:
 
 Never develop a release directly on `main`.
 
+### Parallel Releases
+
+- Reserve the next version when starting each parallel task.
+- A finished later version may be pushed, but its PR—and therefore CI—waits for every earlier reserved version to merge.
+- After an earlier version merges, rebase the next version on current `main`, test it, then open its PR.
+- Release versions strictly in order. Never rename, reuse, or downgrade a version branch.
+
 ## Release
 
 After a successful merge into `main`, the release workflow must:

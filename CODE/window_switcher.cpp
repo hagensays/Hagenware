@@ -1,6 +1,8 @@
 #include "window_switcher.h"
 
 #include <dwmapi.h>
+#include <objidl.h>
+#include <wincodec.h>
 
 #include "resource.h"
 
@@ -34,7 +36,114 @@ int g_firstVisible = 0;
 int g_visibleCount = 0;
 bool g_hiding = false;
 HBITMAP g_glamour = nullptr;
+int g_glamourSourceWidth = 0;
+int g_glamourSourceHeight = 0;
 int g_contentWidth = 0;
+bool g_comInitialized = false;
+
+HBITMAP LoadGlamourBitmap() {
+    HRSRC resource = FindResourceW(g_instance, MAKEINTRESOURCEW(IDB_SWITCHER_GLAMOUR), RT_RCDATA);
+    if (resource == nullptr) {
+        return nullptr;
+    }
+
+    HGLOBAL loaded = LoadResource(g_instance, resource);
+    const DWORD resource_size = SizeofResource(g_instance, resource);
+    if (loaded == nullptr || resource_size == 0) {
+        return nullptr;
+    }
+
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, resource_size);
+    if (memory == nullptr) {
+        return nullptr;
+    }
+
+    void* destination = GlobalLock(memory);
+    const void* source = LockResource(loaded);
+    if (destination == nullptr || source == nullptr) {
+        if (destination != nullptr) {
+            GlobalUnlock(memory);
+        }
+        GlobalFree(memory);
+        return nullptr;
+    }
+    CopyMemory(destination, source, resource_size);
+    GlobalUnlock(memory);
+
+    IStream* stream = nullptr;
+    if (FAILED(CreateStreamOnHGlobal(memory, TRUE, &stream))) {
+        GlobalFree(memory);
+        return nullptr;
+    }
+
+    IWICImagingFactory* factory = nullptr;
+    IWICBitmapDecoder* decoder = nullptr;
+    IWICBitmapFrameDecode* frame = nullptr;
+    IWICFormatConverter* converter = nullptr;
+    HBITMAP bitmap = nullptr;
+
+    do {
+        if (FAILED(CoCreateInstance(
+                CLSID_WICImagingFactory,
+                nullptr,
+                CLSCTX_INPROC_SERVER,
+                IID_PPV_ARGS(&factory)))) {
+            break;
+        }
+        if (FAILED(factory->CreateDecoderFromStream(
+                stream,
+                nullptr,
+                WICDecodeMetadataCacheOnLoad,
+                &decoder)) ||
+            FAILED(decoder->GetFrame(0, &frame)) ||
+            FAILED(factory->CreateFormatConverter(&converter)) ||
+            FAILED(converter->Initialize(
+                frame,
+                GUID_WICPixelFormat32bppPBGRA,
+                WICBitmapDitherTypeNone,
+                nullptr,
+                0.0,
+                WICBitmapPaletteTypeCustom))) {
+            break;
+        }
+
+        UINT width = 0;
+        UINT height = 0;
+        if (FAILED(converter->GetSize(&width, &height)) || width == 0 || height == 0) {
+            break;
+        }
+
+        BITMAPINFO bitmap_info{};
+        bitmap_info.bmiHeader.biSize = sizeof(bitmap_info.bmiHeader);
+        bitmap_info.bmiHeader.biWidth = static_cast<LONG>(width);
+        bitmap_info.bmiHeader.biHeight = -static_cast<LONG>(height);
+        bitmap_info.bmiHeader.biPlanes = 1;
+        bitmap_info.bmiHeader.biBitCount = 32;
+        bitmap_info.bmiHeader.biCompression = BI_RGB;
+
+        void* pixels = nullptr;
+        HDC screen = GetDC(nullptr);
+        bitmap = CreateDIBSection(screen, &bitmap_info, DIB_RGB_COLORS, &pixels, nullptr, 0);
+        ReleaseDC(nullptr, screen);
+        if (bitmap == nullptr || pixels == nullptr ||
+            FAILED(converter->CopyPixels(nullptr, width * 4, width * height * 4, static_cast<BYTE*>(pixels)))) {
+            if (bitmap != nullptr) {
+                DeleteObject(bitmap);
+                bitmap = nullptr;
+            }
+        } else {
+            g_glamourSourceWidth = static_cast<int>(width);
+            g_glamourSourceHeight = static_cast<int>(height);
+        }
+    } while (false);
+
+    if (converter != nullptr) converter->Release();
+    if (frame != nullptr) frame->Release();
+    if (decoder != nullptr) decoder->Release();
+    if (factory != nullptr) factory->Release();
+    stream->Release();
+    return bitmap;
+}
 
 bool IsCandidateWindow(HWND window) {
     if (window == nullptr || window == g_window || window == GetShellWindow() || IsWindowVisible(window) == FALSE) {
@@ -300,8 +409,8 @@ void PaintSwitcher(HWND window) {
             image_dc,
             0,
             0,
-            4096,
-            1536,
+            g_glamourSourceWidth,
+            g_glamourSourceHeight,
             SRCCOPY);
         SelectObject(image_dc, previous_image);
         DeleteDC(image_dc);
@@ -470,8 +579,20 @@ bool Initialize(HINSTANCE instance) {
         return false;
     }
 
-    g_glamour = LoadBitmapW(instance, MAKEINTRESOURCEW(IDB_SWITCHER_GLAMOUR));
+    HRESULT com_result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (FAILED(com_result)) {
+        DestroyWindow(g_window);
+        g_window = nullptr;
+        UnregisterClassW(kSwitcherClassName, instance);
+        g_instance = nullptr;
+        return false;
+    }
+    g_comInitialized = true;
+
+    g_glamour = LoadGlamourBitmap();
     if (g_glamour == nullptr) {
+        CoUninitialize();
+        g_comInitialized = false;
         DestroyWindow(g_window);
         g_window = nullptr;
         UnregisterClassW(kSwitcherClassName, instance);
@@ -544,6 +665,12 @@ void Shutdown() {
     if (g_glamour != nullptr) {
         DeleteObject(g_glamour);
         g_glamour = nullptr;
+    }
+    g_glamourSourceWidth = 0;
+    g_glamourSourceHeight = 0;
+    if (g_comInitialized) {
+        CoUninitialize();
+        g_comInitialized = false;
     }
 }
 

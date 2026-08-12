@@ -21,9 +21,16 @@ jobs:
       - name: Read version
         shell: pwsh
         run: |
-          $version = '${{ github.event.pull_request.head.ref }}'
-          if ($version -notmatch '^v\d+\.\d+\.\d+$') {
-            throw "Merged branch must be named vX.Y.Z."
+          $header = Get-Content -Raw 'CODE/version.h'
+          $match = [regex]::Match($header, 'kNumber\[\]\s*=\s*L"(?<version>v\d+\.\d+\.\d+)"')
+          if (-not $match.Success) {
+            throw "CODE/version.h must define Version::kNumber as vX.Y.Z."
+          }
+
+          $version = $match.Groups['version'].Value
+          $branch = '${{ github.event.pull_request.head.ref }}'
+          if ($version -ne $branch) {
+            throw "CODE/version.h version must match the merged release branch name."
           }
           "VERSION=$version" >> $env:GITHUB_ENV
 

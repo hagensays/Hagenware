@@ -1,13 +1,16 @@
 #include <windows.h>
 
+#include <string>
+
 #include "input_dismiss.h"
 #include "trigger.h"
+#include "version.h"
 #include "window_switcher.h"
 
 namespace {
 constexpr wchar_t kClassName[] = L"HagenwareWindow";
 constexpr wchar_t kWindowTitle[] = L"Hagenware";
-constexpr wchar_t kMessage[] = L"Hagenware v0.1.3";
+const std::wstring kMessage = std::wstring(L"Hagenware ") + Version::kNumber;
 constexpr UINT kTriggerMessage = WM_APP + 1;
 
 void SetTriggerEnabled(bool enabled) {
@@ -24,7 +27,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
         HDC dc = BeginPaint(window, &paint);
         RECT client{};
         GetClientRect(window, &client);
-        DrawTextW(dc, kMessage, -1, &client, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        DrawTextW(dc, kMessage.c_str(), -1, &client, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         EndPaint(window, &paint);
         return 0;
     }

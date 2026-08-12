@@ -18,6 +18,15 @@ jobs:
             throw "Release branch must be named vX.Y.Z."
           }
 
+          $header = Get-Content -Raw 'CODE/version.h'
+          $match = [regex]::Match($header, 'kNumber\[\]\s*=\s*L"(?<version>v\d+\.\d+\.\d+)"')
+          if (-not $match.Success) {
+            throw "CODE/version.h must define Version::kNumber as vX.Y.Z."
+          }
+          if ($match.Groups['version'].Value -ne $env:GITHUB_HEAD_REF) {
+            throw "CODE/version.h version must match the release branch name."
+          }
+
       - name: Build Release x64
         shell: pwsh
         run: |

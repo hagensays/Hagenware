@@ -2,6 +2,6 @@
 
 namespace Version {
 
-inline constexpr wchar_t kNumber[] = L"v0.3.3";
+inline constexpr wchar_t kNumber[] = L"v0.3.4";
 
 } // namespace Version

@@ -12,9 +12,9 @@
 
 ## Code
 
-Keep it simple, native, and easy for another AI agent to understand.
+Keep it simple, native, lean, and easy for another AI agent to understand.
 
-Avoid unnecessary abstractions, dependencies, metaprogramming, generated architecture, and unrelated refactors.
+A lean codebase does not mean minimizing lines of code. Use as many lines as needed for clear, maintainable, explicit code; avoid unnecessary code, abstractions, dependencies, metaprogramming, generated architecture, and unrelated refactors.
 
 Use Windows APIs when Windows already provides the functionality.
 

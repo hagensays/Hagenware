@@ -3,7 +3,7 @@
 namespace {
 constexpr wchar_t kClassName[] = L"HagenwareWindow";
 constexpr wchar_t kWindowTitle[] = L"Hagenware";
-constexpr wchar_t kMessage[] = L"Hagenware v0.1.0";
+constexpr wchar_t kMessage[] = L"Hagenware v0.1.1";
 
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {

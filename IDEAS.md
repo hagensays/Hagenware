@@ -14,7 +14,8 @@ A possible long-term direction is for Hagenware to behave more like a lightweigh
 - Individual surfaces should be separate, lightweight Win32 window/widget-like entities rather than pages inside a large permanent application shell.
 - Surfaces should appear only when needed and disappear cleanly when the interaction is finished.
 - The current minimalist white surface with black borders is a good visual baseline for these floating entities.
-- The current Alt+Tab-style window switcher can serve as the first primary surface.
+- `Deck` is the current Alt+Tab-style window-switching surface.
+- `Grid` is the current Ctrl-triggered window-sizing and placement surface.
 - Possible future surfaces could include a launcher, command palette, contextual tools, or other small widgets.
 - Avoid introducing a giant persistent shell, nested-page architecture, or other application chrome unless a concrete feature eventually needs it.
 - If a visible main Hagenware window stops serving a useful purpose, it could eventually be removed in favor of only the minimal hidden/message-host plumbing actually required by the system.
@@ -25,7 +26,7 @@ Keep the interaction conceptually simple:
 
 `trigger -> Hagenware/surface coordinator -> selected surface`
 
-The trigger mechanism should not know what UI it launches, and individual surfaces should not know which shortcut or gesture invoked them. This keeps it easy to replace bare Shift later without rewriting the window switcher or future widgets.
+The trigger mechanism should not know what UI it launches, and individual surfaces should not know which shortcut or gesture invoked them. This keeps it easy to replace bare Shift or Ctrl later without rewriting Deck, Grid, or future widgets.
 
 Use modularity where it improves clarity or replaceability, but do not create layers or modules merely to match this diagram.
 

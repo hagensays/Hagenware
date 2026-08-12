@@ -2,7 +2,7 @@
 
 #include <windows.h>
 
-namespace WindowPlacement {
+namespace Grid {
 
 bool Initialize(HINSTANCE instance);
 void Show();
@@ -10,4 +10,4 @@ void Hide();
 void DismissForPassThrough();
 void Shutdown();
 
-} // namespace WindowPlacement
+} // namespace Grid

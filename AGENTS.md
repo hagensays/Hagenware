@@ -20,6 +20,7 @@ Keep the codebase simple, native, lean, and easy for another AI agent to underst
 
 A lean codebase does not mean minimizing lines of code. Use as many lines as needed for clear, maintainable, explicit code while avoiding unnecessary code, abstractions, dependencies, metaprogramming, generated architecture, and unrelated refactors.
 
+- Preserve the current minimalist visual aesthetic. Do not redesign, embellish, or add visual complexity unless explicitly requested.
 - Prefer local, explicit state; avoid hidden globals, unnecessary singletons, and complicated shared mutable state.
 - Use Unicode Win32 APIs (`...W`) consistently.
 - Prefer event-driven Win32 messages, notifications, waits, and callbacks over polling.

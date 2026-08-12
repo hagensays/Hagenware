@@ -1,22 +1,24 @@
 # AGENTS.md
 
+This file is the authoritative rule set for Hagenware.
+
 ## Stack
 
+- Windows only.
 - C++ + raw Win32 only.
 - No frameworks.
 - No third-party runtime dependencies without explicit approval.
-- Assume only Windows system components are available.
+- Assume only a clean supported Windows installation and Windows system components are available.
 - Release builds should use `/MT`.
-- Prefer a single self-contained `.exe`.
+- Prefer one self-contained `.exe`.
+- If Windows already provides the functionality, use Windows.
 - All source code and project files belong in `CODE/`.
 
 ## Code
 
-Keep it simple, native, lean, and easy for another AI agent to understand.
+Keep the codebase simple, native, lean, and easy for another AI agent to understand.
 
-A lean codebase does not mean minimizing lines of code. Use as many lines as needed for clear, maintainable, explicit code; avoid unnecessary code, abstractions, dependencies, metaprogramming, generated architecture, and unrelated refactors.
-
-Use Windows APIs when Windows already provides the functionality.
+A lean codebase does not mean minimizing lines of code. Use as many lines as needed for clear, maintainable, explicit code while avoiding unnecessary code, abstractions, dependencies, metaprogramming, generated architecture, and unrelated refactors.
 
 ## Version Workflow
 

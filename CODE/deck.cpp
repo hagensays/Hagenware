@@ -2,6 +2,7 @@
 
 #include <dwmapi.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,8 @@ constexpr int kPreviewInset = 8;
 constexpr int kPreviewHeight = 108;
 constexpr int kMonitorMargin = 40;
 constexpr int kSelectionThickness = 3;
+constexpr int kMaxNumberedCards = 9;
+constexpr BYTE kThumbnailOpacity = 224;
 
 struct WindowEntry {
     HWND window = nullptr;
@@ -25,6 +28,9 @@ struct WindowEntry {
 HINSTANCE g_instance = nullptr;
 HWND g_window = nullptr;
 HWND g_returnWindow = nullptr;
+HWINEVENTHOOK g_foregroundEventHook = nullptr;
+HFONT g_numberFont = nullptr;
+std::vector<HWND> g_recentWindows;
 std::vector<WindowEntry> g_entries;
 int g_selected = 0;
 int g_firstVisible = 0;
@@ -51,6 +57,39 @@ bool IsCandidateWindow(HWND window) {
     }
 
     return GetWindowTextLengthW(window) > 0;
+}
+
+void RememberWindow(HWND window) {
+    if (!IsCandidateWindow(window)) {
+        return;
+    }
+
+    const auto existing = std::find(g_recentWindows.begin(), g_recentWindows.end(), window);
+    if (existing != g_recentWindows.end()) {
+        g_recentWindows.erase(existing);
+    }
+
+    g_recentWindows.insert(g_recentWindows.begin(), window);
+}
+
+void CALLBACK ForegroundEventProc(
+    HWINEVENTHOOK,
+    DWORD event,
+    HWND window,
+    LONG,
+    LONG,
+    DWORD,
+    DWORD) {
+    if (event == EVENT_SYSTEM_FOREGROUND) {
+        RememberWindow(window);
+    }
+}
+
+BOOL CALLBACK SeedRecentWindow(HWND window, LPARAM) {
+    if (IsCandidateWindow(window)) {
+        g_recentWindows.push_back(window);
+    }
+    return TRUE;
 }
 
 BOOL CALLBACK EnumerateWindow(HWND window, LPARAM context) {
@@ -85,9 +124,40 @@ void ClearEntries() {
     g_entries.clear();
 }
 
+size_t RecentRank(HWND window) {
+    const auto found = std::find(g_recentWindows.begin(), g_recentWindows.end(), window);
+    if (found == g_recentWindows.end()) {
+        return g_recentWindows.size();
+    }
+    return static_cast<size_t>(found - g_recentWindows.begin());
+}
+
 void RefreshEntries() {
     ClearEntries();
+
+    g_recentWindows.erase(
+        std::remove_if(
+            g_recentWindows.begin(),
+            g_recentWindows.end(),
+            [](HWND window) {
+                return !IsCandidateWindow(window);
+            }),
+        g_recentWindows.end());
+
     EnumWindows(EnumerateWindow, reinterpret_cast<LPARAM>(&g_entries));
+
+    std::stable_sort(
+        g_entries.begin(),
+        g_entries.end(),
+        [](const WindowEntry& left, const WindowEntry& right) {
+            return RecentRank(left.window) < RecentRank(right.window);
+        });
+
+    for (const WindowEntry& entry : g_entries) {
+        if (std::find(g_recentWindows.begin(), g_recentWindows.end(), entry.window) == g_recentWindows.end()) {
+            g_recentWindows.push_back(entry.window);
+        }
+    }
 }
 
 RECT CardRect(int slot) {
@@ -176,7 +246,7 @@ void UpdateThumbnailLayout() {
             DWM_TNP_OPACITY |
             DWM_TNP_SOURCECLIENTAREAONLY;
         properties.rcDestination = destination;
-        properties.opacity = 255;
+        properties.opacity = kThumbnailOpacity;
         properties.fVisible = TRUE;
         properties.fSourceClientAreaOnly = FALSE;
         DwmUpdateThumbnailProperties(entry.thumbnail, &properties);
@@ -268,19 +338,53 @@ void ActivateSelected() {
     ActivateWindow(target);
 }
 
+void ActivateVisibleSlot(int slot) {
+    if (slot < 0 || slot >= g_visibleCount) {
+        return;
+    }
+
+    const int index = g_firstVisible + slot;
+    if (index < 0 || index >= static_cast<int>(g_entries.size())) {
+        return;
+    }
+
+    g_selected = index;
+    ActivateSelected();
+}
+
 void ActivateCardAtPoint(POINT point) {
     for (int slot = 0; slot < g_visibleCount; ++slot) {
         RECT card = CardRect(slot);
-        if (PtInRect(&card, point) == FALSE) {
-            continue;
+        if (PtInRect(&card, point) != FALSE) {
+            ActivateVisibleSlot(slot);
+            return;
         }
+    }
+}
 
-        const int index = g_firstVisible + slot;
-        if (index >= 0 && index < static_cast<int>(g_entries.size())) {
-            g_selected = index;
-            ActivateSelected();
-        }
+void DrawCardNumber(HDC dc, int slot) {
+    if (g_numberFont == nullptr || slot < 0 || slot >= kMaxNumberedCards) {
         return;
+    }
+
+    wchar_t number[2]{
+        static_cast<wchar_t>(L'1' + slot),
+        L'\0'};
+
+    RECT number_rect = PreviewBounds(slot);
+    HGDIOBJ previous_font = SelectObject(dc, g_numberFont);
+    const COLORREF previous_color = SetTextColor(dc, RGB(128, 128, 128));
+
+    DrawTextW(
+        dc,
+        number,
+        -1,
+        &number_rect,
+        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+    SetTextColor(dc, previous_color);
+    if (previous_font != nullptr) {
+        SelectObject(dc, previous_font);
     }
 }
 
@@ -313,6 +417,9 @@ void PaintDeck(HWND window) {
                 FrameRect(dc, &selection, reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
             }
         }
+
+        DrawCardNumber(dc, slot);
+        SetTextColor(dc, RGB(0, 0, 0));
 
         RECT title_rect{
             card.left + kPreviewInset,
@@ -356,6 +463,9 @@ void PositionDeck(HWND anchor) {
     if (max_visible < 1) {
         max_visible = 1;
     }
+    if (max_visible > kMaxNumberedCards) {
+        max_visible = kMaxNumberedCards;
+    }
 
     const int entry_count = static_cast<int>(g_entries.size());
     g_visibleCount = entry_count < max_visible ? entry_count : max_visible;
@@ -377,6 +487,17 @@ void PositionDeck(HWND anchor) {
         SWP_SHOWWINDOW);
 }
 
+void SelectPreviousWindow(HWND foreground) {
+    g_selected = 0;
+
+    for (size_t i = 0; i < g_entries.size(); ++i) {
+        if (g_entries[i].window != foreground) {
+            g_selected = static_cast<int>(i);
+            return;
+        }
+    }
+}
+
 LRESULT CALLBACK DeckWindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
     case WM_PAINT:
@@ -385,6 +506,11 @@ LRESULT CALLBACK DeckWindowProc(HWND window, UINT message, WPARAM wparam, LPARAM
     case WM_ERASEBKGND:
         return 1;
     case WM_KEYDOWN:
+        if (wparam >= L'1' && wparam <= L'9') {
+            ActivateVisibleSlot(static_cast<int>(wparam - L'1'));
+            return 0;
+        }
+
         switch (wparam) {
         case VK_LEFT:
         case VK_UP:
@@ -470,6 +596,55 @@ bool Initialize(HINSTANCE instance) {
         return false;
     }
 
+    g_numberFont = CreateFontW(
+        -96,
+        0,
+        0,
+        0,
+        FW_BOLD,
+        FALSE,
+        FALSE,
+        FALSE,
+        DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY,
+        DEFAULT_PITCH | FF_DONTCARE,
+        L"");
+
+    if (g_numberFont == nullptr) {
+        HWND window = g_window;
+        g_window = nullptr;
+        DestroyWindow(window);
+        UnregisterClassW(kDeckClassName, instance);
+        g_instance = nullptr;
+        return false;
+    }
+
+    g_foregroundEventHook = SetWinEventHook(
+        EVENT_SYSTEM_FOREGROUND,
+        EVENT_SYSTEM_FOREGROUND,
+        nullptr,
+        ForegroundEventProc,
+        0,
+        0,
+        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+
+    if (g_foregroundEventHook == nullptr) {
+        DeleteObject(g_numberFont);
+        g_numberFont = nullptr;
+        HWND window = g_window;
+        g_window = nullptr;
+        DestroyWindow(window);
+        UnregisterClassW(kDeckClassName, instance);
+        g_instance = nullptr;
+        return false;
+    }
+
+    g_recentWindows.clear();
+    EnumWindows(SeedRecentWindow, 0);
+    RememberWindow(GetForegroundWindow());
+
     return true;
 }
 
@@ -479,20 +654,15 @@ void Show() {
     }
 
     HWND foreground = GetForegroundWindow();
+    RememberWindow(foreground);
     RefreshEntries();
     if (g_entries.empty()) {
         return;
     }
 
     g_returnWindow = foreground;
-    g_selected = 0;
     g_firstVisible = 0;
-    for (size_t i = 0; i < g_entries.size(); ++i) {
-        if (g_entries[i].window == foreground) {
-            g_selected = static_cast<int>(i);
-            break;
-        }
-    }
+    SelectPreviousWindow(foreground);
 
     PositionDeck(foreground);
     EnsureSelectedVisible();
@@ -527,7 +697,19 @@ void DismissForPassThrough() {
 }
 
 void Shutdown() {
+    if (g_foregroundEventHook != nullptr) {
+        UnhookWinEvent(g_foregroundEventHook);
+        g_foregroundEventHook = nullptr;
+    }
+
     Hide();
+
+    if (g_numberFont != nullptr) {
+        DeleteObject(g_numberFont);
+        g_numberFont = nullptr;
+    }
+
+    g_recentWindows.clear();
 
     if (g_window != nullptr) {
         HWND window = g_window;

@@ -230,6 +230,16 @@ void ApplyPlacement(int number) {
     ActivateTarget(target);
 }
 
+void ApplyCellAtPoint(POINT point) {
+    for (int index = 0; index < 9; ++index) {
+        RECT cell = CellRect(index);
+        if (PtInRect(&cell, point) != FALSE) {
+            ApplyPlacement(kCells[index].number);
+            return;
+        }
+    }
+}
+
 void CancelAndReturnToTarget() {
     HWND target = g_targetWindow;
     Grid::Hide();
@@ -251,11 +261,14 @@ LRESULT CALLBACK GridWindowProc(HWND window, UINT message, WPARAM wparam, LPARAM
             CancelAndReturnToTarget();
         }
         return 0;
-    case WM_LBUTTONDOWN:
+    case WM_LBUTTONDOWN: {
+        const POINTS mouse = MAKEPOINTS(lparam);
+        ApplyCellAtPoint(POINT{mouse.x, mouse.y});
+        return 0;
+    }
     case WM_RBUTTONDOWN:
     case WM_MBUTTONDOWN:
     case WM_XBUTTONDOWN:
-        CancelAndReturnToTarget();
         return 0;
     case WM_ACTIVATE:
         if (LOWORD(wparam) == WA_INACTIVE && !g_hiding && IsWindowVisible(window) != FALSE) {

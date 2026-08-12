@@ -98,7 +98,7 @@ void RefreshEntries() {
 RECT CardRect(int slot) {
     const int cards_width = (g_visibleCount * kCardWidth) + ((g_visibleCount - 1) * kGap);
     const LONG left = static_cast<LONG>((g_contentWidth - cards_width) / 2 + slot * (kCardWidth + kGap));
-    const LONG top = kPadding + kGlamourHeight + kGap;
+    const LONG top = kPadding;
     return RECT{left, top, left + kCardWidth, top + kCardHeight};
 }
 
@@ -291,7 +291,18 @@ void PaintSwitcher(HWND window) {
         HDC image_dc = CreateCompatibleDC(dc);
         HGDIOBJ previous_image = SelectObject(image_dc, g_glamour);
         const int left = (g_contentWidth - kGlamourWidth) / 2;
-        StretchBlt(dc, left, kPadding, kGlamourWidth, kGlamourHeight, image_dc, 0, 0, 4096, 1536, SRCCOPY);
+        StretchBlt(
+            dc,
+            left,
+            kPadding + kCardHeight + kGap,
+            kGlamourWidth,
+            kGlamourHeight,
+            image_dc,
+            0,
+            0,
+            4096,
+            1536,
+            SRCCOPY);
         SelectObject(image_dc, previous_image);
         DeleteDC(image_dc);
     }

@@ -29,20 +29,7 @@ constexpr PlacementCell kCells[] = {
 HINSTANCE g_instance = nullptr;
 HWND g_window = nullptr;
 HWND g_targetWindow = nullptr;
-WindowPlacement::TriggerEnabledCallback g_setTriggerEnabled = nullptr;
-bool g_triggerSuppressed = false;
 bool g_hiding = false;
-
-void SetTriggerSuppressed(bool suppressed) {
-    if (g_triggerSuppressed == suppressed) {
-        return;
-    }
-
-    g_triggerSuppressed = suppressed;
-    if (g_setTriggerEnabled != nullptr) {
-        g_setTriggerEnabled(!suppressed);
-    }
-}
 
 bool IsCandidateTarget(HWND window) {
     return window != nullptr &&
@@ -260,7 +247,7 @@ LRESULT CALLBACK PlacementWindowProc(HWND window, UINT message, WPARAM wparam, L
         }
         return 0;
     case WM_CLOSE:
-        WindowPlacement::Hide();
+        CancelAndReturnToTarget();
         return 0;
     case WM_DESTROY:
         g_targetWindow = nullptr;
@@ -273,13 +260,12 @@ LRESULT CALLBACK PlacementWindowProc(HWND window, UINT message, WPARAM wparam, L
 
 namespace WindowPlacement {
 
-bool Initialize(HINSTANCE instance, TriggerEnabledCallback set_trigger_enabled) {
-    if (instance == nullptr || set_trigger_enabled == nullptr) {
+bool Initialize(HINSTANCE instance) {
+    if (instance == nullptr) {
         return false;
     }
 
     g_instance = instance;
-    g_setTriggerEnabled = set_trigger_enabled;
 
     WNDCLASSW window_class{};
     window_class.lpfnWndProc = PlacementWindowProc;
@@ -290,7 +276,6 @@ bool Initialize(HINSTANCE instance, TriggerEnabledCallback set_trigger_enabled) 
 
     if (RegisterClassW(&window_class) == 0) {
         g_instance = nullptr;
-        g_setTriggerEnabled = nullptr;
         return false;
     }
 
@@ -311,7 +296,6 @@ bool Initialize(HINSTANCE instance, TriggerEnabledCallback set_trigger_enabled) 
     if (g_window == nullptr) {
         UnregisterClassW(kPlacementClassName, instance);
         g_instance = nullptr;
-        g_setTriggerEnabled = nullptr;
         return false;
     }
 
@@ -329,7 +313,6 @@ void Show() {
     }
 
     g_targetWindow = target;
-    SetTriggerSuppressed(true);
     PositionPlacement(target);
     InvalidateRect(g_window, nullptr, FALSE);
     UpdateWindow(g_window);
@@ -346,8 +329,11 @@ void Hide() {
         ShowWindow(g_window, SW_HIDE);
     }
     g_targetWindow = nullptr;
-    SetTriggerSuppressed(false);
     g_hiding = false;
+}
+
+void DismissForPassThrough() {
+    CancelAndReturnToTarget();
 }
 
 void Shutdown() {
@@ -363,9 +349,6 @@ void Shutdown() {
         UnregisterClassW(kPlacementClassName, g_instance);
         g_instance = nullptr;
     }
-
-    g_setTriggerEnabled = nullptr;
-    g_triggerSuppressed = false;
 }
 
 } // namespace WindowPlacement

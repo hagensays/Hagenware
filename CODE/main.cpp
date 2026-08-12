@@ -15,8 +15,8 @@ const std::wstring kMessage = std::wstring(L"Hagenware ") + Version::kNumber;
 constexpr UINT kShiftTriggerMessage = WM_APP + 1;
 constexpr UINT kControlTriggerMessage = WM_APP + 2;
 
-void SetTriggerEnabled(bool enabled) {
-    Trigger::SetEnabled(enabled);
+void SuppressTriggerModifier(DWORD virtual_key) {
+    Trigger::SuppressModifierUntilRelease(virtual_key);
 }
 
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -79,7 +79,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
         return 1;
     }
 
-    if (!WindowPlacement::Initialize(instance, SetTriggerEnabled)) {
+    if (!WindowPlacement::Initialize(instance)) {
         WindowSwitcher::Shutdown();
         DestroyWindow(window);
         return 1;
@@ -92,7 +92,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
         return 1;
     }
 
-    if (!InputDismiss::Start(SetTriggerEnabled)) {
+    if (!InputDismiss::Start(SuppressTriggerModifier)) {
         Trigger::Stop();
         WindowPlacement::Shutdown();
         WindowSwitcher::Shutdown();

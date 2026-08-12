@@ -4,11 +4,10 @@
 
 namespace WindowPlacement {
 
-using TriggerEnabledCallback = void (*)(bool enabled);
-
-bool Initialize(HINSTANCE instance, TriggerEnabledCallback set_trigger_enabled);
+bool Initialize(HINSTANCE instance);
 void Show();
 void Hide();
+void DismissForPassThrough();
 void Shutdown();
 
 } // namespace WindowPlacement

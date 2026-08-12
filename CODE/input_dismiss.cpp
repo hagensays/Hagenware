@@ -201,8 +201,12 @@ void CALLBACK WindowEventProc(
     }
 
     if (event == EVENT_OBJECT_SHOW) {
-        StartInputHooks(window, surface);
-    } else if (event == EVENT_OBJECT_HIDE && window == g_surfaceWindow) {
+        if (IsWindowVisible(window) != FALSE) {
+            StartInputHooks(window, surface);
+        }
+    } else if (event == EVENT_OBJECT_HIDE &&
+        window == g_surfaceWindow &&
+        IsWindowVisible(window) == FALSE) {
         StopInputHooks();
     }
 }

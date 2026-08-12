@@ -268,6 +268,22 @@ void ActivateSelected() {
     ActivateWindow(target);
 }
 
+void ActivateCardAtPoint(POINT point) {
+    for (int slot = 0; slot < g_visibleCount; ++slot) {
+        RECT card = CardRect(slot);
+        if (PtInRect(&card, point) == FALSE) {
+            continue;
+        }
+
+        const int index = g_firstVisible + slot;
+        if (index >= 0 && index < static_cast<int>(g_entries.size())) {
+            g_selected = index;
+            ActivateSelected();
+        }
+        return;
+    }
+}
+
 void PaintDeck(HWND window) {
     PAINTSTRUCT paint{};
     HDC dc = BeginPaint(window, &paint);
@@ -388,6 +404,15 @@ LRESULT CALLBACK DeckWindowProc(HWND window, UINT message, WPARAM wparam, LPARAM
             break;
         }
         break;
+    case WM_LBUTTONDOWN: {
+        const POINTS mouse = MAKEPOINTS(lparam);
+        ActivateCardAtPoint(POINT{mouse.x, mouse.y});
+        return 0;
+    }
+    case WM_RBUTTONDOWN:
+    case WM_MBUTTONDOWN:
+    case WM_XBUTTONDOWN:
+        return 0;
     case WM_ACTIVATE:
         if (LOWORD(wparam) == WA_INACTIVE && !g_hiding && IsWindowVisible(window) != FALSE) {
             Deck::Hide();

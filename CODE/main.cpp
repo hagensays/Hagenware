@@ -2,11 +2,11 @@
 
 #include <string>
 
+#include "deck.h"
+#include "grid.h"
 #include "input_dismiss.h"
 #include "trigger.h"
 #include "version.h"
-#include "window_placement.h"
-#include "window_switcher.h"
 
 namespace {
 constexpr wchar_t kClassName[] = L"HagenwareWindow";
@@ -22,10 +22,10 @@ void SuppressTriggerModifier(DWORD virtual_key) {
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
     case kShiftTriggerMessage:
-        WindowSwitcher::Show();
+        Deck::Show();
         return 0;
     case kControlTriggerMessage:
-        WindowPlacement::Show();
+        Grid::Show();
         return 0;
     case WM_PAINT: {
         PAINTSTRUCT paint{};
@@ -74,28 +74,28 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
         return 1;
     }
 
-    if (!WindowSwitcher::Initialize(instance)) {
+    if (!Deck::Initialize(instance)) {
         DestroyWindow(window);
         return 1;
     }
 
-    if (!WindowPlacement::Initialize(instance)) {
-        WindowSwitcher::Shutdown();
+    if (!Grid::Initialize(instance)) {
+        Deck::Shutdown();
         DestroyWindow(window);
         return 1;
     }
 
     if (!Trigger::Start(window, kShiftTriggerMessage, kControlTriggerMessage)) {
-        WindowPlacement::Shutdown();
-        WindowSwitcher::Shutdown();
+        Grid::Shutdown();
+        Deck::Shutdown();
         DestroyWindow(window);
         return 1;
     }
 
     if (!InputDismiss::Start(SuppressTriggerModifier)) {
         Trigger::Stop();
-        WindowPlacement::Shutdown();
-        WindowSwitcher::Shutdown();
+        Grid::Shutdown();
+        Deck::Shutdown();
         DestroyWindow(window);
         return 1;
     }
@@ -109,9 +109,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
     }
 
     InputDismiss::Stop();
-    WindowPlacement::Shutdown();
+    Grid::Shutdown();
     Trigger::Stop();
-    WindowSwitcher::Shutdown();
+    Deck::Shutdown();
 
     return static_cast<int>(message.wParam);
 }

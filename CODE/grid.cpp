@@ -1,7 +1,7 @@
-#include "window_placement.h"
+#include "grid.h"
 
 namespace {
-constexpr wchar_t kPlacementClassName[] = L"HagenwareWindowPlacement";
+constexpr wchar_t kGridClassName[] = L"HagenwareGrid";
 constexpr int kPadding = 10;
 constexpr int kGap = 6;
 constexpr int kCellWidth = 104;
@@ -9,12 +9,12 @@ constexpr int kCellHeight = 72;
 constexpr int kWindowWidth = (2 * kPadding) + (3 * kCellWidth) + (2 * kGap);
 constexpr int kWindowHeight = (2 * kPadding) + (3 * kCellHeight) + (2 * kGap);
 
-struct PlacementCell {
+struct GridCell {
     int number;
     const wchar_t* label;
 };
 
-constexpr PlacementCell kCells[] = {
+constexpr GridCell kCells[] = {
     {7, L"7\nTop left"},
     {8, L"8\nTop half"},
     {9, L"9\nTop right"},
@@ -47,7 +47,7 @@ RECT CellRect(int index) {
     return RECT{left, top, left + kCellWidth, top + kCellHeight};
 }
 
-void PaintPlacement(HWND window) {
+void PaintGrid(HWND window) {
     PAINTSTRUCT paint{};
     HDC dc = BeginPaint(window, &paint);
 
@@ -63,13 +63,29 @@ void PaintPlacement(HWND window) {
     for (int index = 0; index < 9; ++index) {
         RECT cell = CellRect(index);
         FrameRect(dc, &cell, reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
-        InflateRect(&cell, -6, -6);
+
+        RECT text_bounds = cell;
+        InflateRect(&text_bounds, -6, -6);
+
+        RECT measured{0, 0, text_bounds.right - text_bounds.left, 0};
         DrawTextW(
             dc,
             kCells[index].label,
             -1,
-            &cell,
-            DT_CENTER | DT_VCENTER | DT_WORDBREAK | DT_NOPREFIX);
+            &measured,
+            DT_CENTER | DT_WORDBREAK | DT_NOPREFIX | DT_CALCRECT);
+
+        const LONG text_height = measured.bottom - measured.top;
+        const LONG available_height = text_bounds.bottom - text_bounds.top;
+        text_bounds.top += (available_height - text_height) / 2;
+        text_bounds.bottom = text_bounds.top + text_height;
+
+        DrawTextW(
+            dc,
+            kCells[index].label,
+            -1,
+            &text_bounds,
+            DT_CENTER | DT_WORDBREAK | DT_NOPREFIX);
     }
 
     if (previous_font != nullptr) {
@@ -140,7 +156,7 @@ void ActivateTarget(HWND target) {
     }
 }
 
-void FocusPlacement() {
+void FocusGrid() {
     HWND foreground = GetForegroundWindow();
     const DWORD current_thread = GetCurrentThreadId();
     const DWORD foreground_thread = foreground != nullptr
@@ -161,7 +177,7 @@ void FocusPlacement() {
     }
 }
 
-void PositionPlacement(HWND target) {
+void PositionGrid(HWND target) {
     const RECT work_area = GetTargetWorkArea(target);
     const int work_width = static_cast<int>(work_area.right - work_area.left);
     const int work_height = static_cast<int>(work_area.bottom - work_area.top);
@@ -181,12 +197,12 @@ void PositionPlacement(HWND target) {
 void ApplyPlacement(int number) {
     HWND target = g_targetWindow;
     if (!IsCandidateTarget(target)) {
-        WindowPlacement::Hide();
+        Grid::Hide();
         return;
     }
 
     const RECT work_area = GetTargetWorkArea(target);
-    WindowPlacement::Hide();
+    Grid::Hide();
 
     if (number == 5) {
         if (IsZoomed(target) != FALSE) {
@@ -216,14 +232,14 @@ void ApplyPlacement(int number) {
 
 void CancelAndReturnToTarget() {
     HWND target = g_targetWindow;
-    WindowPlacement::Hide();
+    Grid::Hide();
     ActivateTarget(target);
 }
 
-LRESULT CALLBACK PlacementWindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+LRESULT CALLBACK GridWindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
     case WM_PAINT:
-        PaintPlacement(window);
+        PaintGrid(window);
         return 0;
     case WM_ERASEBKGND:
         return 1;
@@ -243,7 +259,7 @@ LRESULT CALLBACK PlacementWindowProc(HWND window, UINT message, WPARAM wparam, L
         return 0;
     case WM_ACTIVATE:
         if (LOWORD(wparam) == WA_INACTIVE && !g_hiding && IsWindowVisible(window) != FALSE) {
-            WindowPlacement::Hide();
+            Grid::Hide();
         }
         return 0;
     case WM_CLOSE:
@@ -258,7 +274,7 @@ LRESULT CALLBACK PlacementWindowProc(HWND window, UINT message, WPARAM wparam, L
 }
 } // namespace
 
-namespace WindowPlacement {
+namespace Grid {
 
 bool Initialize(HINSTANCE instance) {
     if (instance == nullptr) {
@@ -268,11 +284,11 @@ bool Initialize(HINSTANCE instance) {
     g_instance = instance;
 
     WNDCLASSW window_class{};
-    window_class.lpfnWndProc = PlacementWindowProc;
+    window_class.lpfnWndProc = GridWindowProc;
     window_class.hInstance = instance;
     window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     window_class.hbrBackground = reinterpret_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));
-    window_class.lpszClassName = kPlacementClassName;
+    window_class.lpszClassName = kGridClassName;
 
     if (RegisterClassW(&window_class) == 0) {
         g_instance = nullptr;
@@ -281,7 +297,7 @@ bool Initialize(HINSTANCE instance) {
 
     g_window = CreateWindowExW(
         WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
-        kPlacementClassName,
+        kGridClassName,
         L"",
         WS_POPUP,
         0,
@@ -294,7 +310,7 @@ bool Initialize(HINSTANCE instance) {
         nullptr);
 
     if (g_window == nullptr) {
-        UnregisterClassW(kPlacementClassName, instance);
+        UnregisterClassW(kGridClassName, instance);
         g_instance = nullptr;
         return false;
     }
@@ -313,10 +329,10 @@ void Show() {
     }
 
     g_targetWindow = target;
-    PositionPlacement(target);
+    PositionGrid(target);
     InvalidateRect(g_window, nullptr, FALSE);
     UpdateWindow(g_window);
-    FocusPlacement();
+    FocusGrid();
 }
 
 void Hide() {
@@ -346,9 +362,9 @@ void Shutdown() {
     }
 
     if (g_instance != nullptr) {
-        UnregisterClassW(kPlacementClassName, g_instance);
+        UnregisterClassW(kGridClassName, g_instance);
         g_instance = nullptr;
     }
 }
 
-} // namespace WindowPlacement
+} // namespace Grid

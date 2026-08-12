@@ -2,7 +2,7 @@
 
 #include <windows.h>
 
-namespace WindowSwitcher {
+namespace Deck {
 
 bool Initialize(HINSTANCE instance);
 void Show();
@@ -10,4 +10,4 @@ void Hide();
 void DismissForPassThrough();
 void Shutdown();
 
-} // namespace WindowSwitcher
+} // namespace Deck

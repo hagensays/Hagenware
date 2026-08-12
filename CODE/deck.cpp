@@ -1,4 +1,4 @@
-#include "window_switcher.h"
+#include "deck.h"
 
 #include <dwmapi.h>
 
@@ -6,7 +6,7 @@
 #include <vector>
 
 namespace {
-constexpr wchar_t kSwitcherClassName[] = L"HagenwareWindowSwitcher";
+constexpr wchar_t kDeckClassName[] = L"HagenwareDeck";
 constexpr int kPadding = 12;
 constexpr int kGap = 10;
 constexpr int kCardWidth = 210;
@@ -210,7 +210,7 @@ void MoveSelection(int direction) {
     InvalidateRect(g_window, nullptr, FALSE);
 }
 
-void FocusSwitcher() {
+void FocusDeck() {
     HWND foreground = GetForegroundWindow();
     const DWORD current_thread = GetCurrentThreadId();
     const DWORD foreground_thread = foreground != nullptr
@@ -264,11 +264,11 @@ void ActivateSelected() {
     }
 
     HWND target = g_entries[static_cast<size_t>(g_selected)].window;
-    WindowSwitcher::Hide();
+    Deck::Hide();
     ActivateWindow(target);
 }
 
-void PaintSwitcher(HWND window) {
+void PaintDeck(HWND window) {
     PAINTSTRUCT paint{};
     HDC dc = BeginPaint(window, &paint);
 
@@ -319,7 +319,7 @@ void PaintSwitcher(HWND window) {
     EndPaint(window, &paint);
 }
 
-void PositionSwitcher(HWND anchor) {
+void PositionDeck(HWND anchor) {
     MONITORINFO monitor_info{};
     monitor_info.cbSize = sizeof(monitor_info);
 
@@ -361,10 +361,10 @@ void PositionSwitcher(HWND anchor) {
         SWP_SHOWWINDOW);
 }
 
-LRESULT CALLBACK SwitcherWindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+LRESULT CALLBACK DeckWindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
     case WM_PAINT:
-        PaintSwitcher(window);
+        PaintDeck(window);
         return 0;
     case WM_ERASEBKGND:
         return 1;
@@ -382,7 +382,7 @@ LRESULT CALLBACK SwitcherWindowProc(HWND window, UINT message, WPARAM wparam, LP
             ActivateSelected();
             return 0;
         case VK_ESCAPE:
-            WindowSwitcher::DismissForPassThrough();
+            Deck::DismissForPassThrough();
             return 0;
         default:
             break;
@@ -390,11 +390,11 @@ LRESULT CALLBACK SwitcherWindowProc(HWND window, UINT message, WPARAM wparam, LP
         break;
     case WM_ACTIVATE:
         if (LOWORD(wparam) == WA_INACTIVE && !g_hiding && IsWindowVisible(window) != FALSE) {
-            WindowSwitcher::Hide();
+            Deck::Hide();
         }
         return 0;
     case WM_CLOSE:
-        WindowSwitcher::DismissForPassThrough();
+        Deck::DismissForPassThrough();
         return 0;
     case WM_DESTROY:
         ClearEntries();
@@ -408,17 +408,17 @@ LRESULT CALLBACK SwitcherWindowProc(HWND window, UINT message, WPARAM wparam, LP
 }
 } // namespace
 
-namespace WindowSwitcher {
+namespace Deck {
 
 bool Initialize(HINSTANCE instance) {
     g_instance = instance;
 
     WNDCLASSW window_class{};
-    window_class.lpfnWndProc = SwitcherWindowProc;
+    window_class.lpfnWndProc = DeckWindowProc;
     window_class.hInstance = instance;
     window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     window_class.hbrBackground = reinterpret_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));
-    window_class.lpszClassName = kSwitcherClassName;
+    window_class.lpszClassName = kDeckClassName;
 
     if (RegisterClassW(&window_class) == 0) {
         g_instance = nullptr;
@@ -427,7 +427,7 @@ bool Initialize(HINSTANCE instance) {
 
     g_window = CreateWindowExW(
         WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
-        kSwitcherClassName,
+        kDeckClassName,
         L"",
         WS_POPUP,
         0,
@@ -440,7 +440,7 @@ bool Initialize(HINSTANCE instance) {
         nullptr);
 
     if (g_window == nullptr) {
-        UnregisterClassW(kSwitcherClassName, instance);
+        UnregisterClassW(kDeckClassName, instance);
         g_instance = nullptr;
         return false;
     }
@@ -469,13 +469,13 @@ void Show() {
         }
     }
 
-    PositionSwitcher(foreground);
+    PositionDeck(foreground);
     EnsureSelectedVisible();
     UpdateWindow(g_window);
     RegisterThumbnails();
     UpdateThumbnailLayout();
     InvalidateRect(g_window, nullptr, FALSE);
-    FocusSwitcher();
+    FocusDeck();
 }
 
 void Hide() {
@@ -511,9 +511,9 @@ void Shutdown() {
     }
 
     if (g_instance != nullptr) {
-        UnregisterClassW(kSwitcherClassName, g_instance);
+        UnregisterClassW(kDeckClassName, g_instance);
         g_instance = nullptr;
     }
 }
 
-} // namespace WindowSwitcher
+} // namespace Deck

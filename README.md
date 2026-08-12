@@ -1,17 +1,7 @@
 # Hagenware
 
-Lean native Windows software.
+Lean native Windows software built with C++ and raw Win32.
 
-## Rules
+All source code lives in `CODE/`.
 
-- C++ only.
-- Raw Win32 only.
-- Windows only.
-- No third-party runtime dependencies.
-- Assume only a clean supported Windows installation.
-- Prefer `/MT`.
-- Prefer one self-contained `.exe`.
-- If Windows already provides it, use Windows.
-- All source code belongs in `CODE/`.
-
-See `AGENTS.md` for development rules.
+See `AGENTS.md` for the authoritative repository and development rules.

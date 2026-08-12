@@ -4,6 +4,7 @@ namespace {
 HHOOK g_hook = nullptr;
 HWND g_targetWindow = nullptr;
 UINT g_triggerMessage = 0;
+bool g_enabled = true;
 bool g_shiftCandidate = false;
 DWORD g_shiftScanCode = 0;
 
@@ -17,7 +18,7 @@ void CancelCandidate() {
 }
 
 LRESULT CALLBACK KeyboardHookProc(int code, WPARAM wparam, LPARAM lparam) {
-    if (code == HC_ACTION) {
+    if (code == HC_ACTION && g_enabled) {
         const auto* key = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lparam);
         const bool key_down = wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN;
         const bool key_up = wparam == WM_KEYUP || wparam == WM_SYSKEYUP;
@@ -56,6 +57,7 @@ bool Start(HWND target_window, UINT trigger_message) {
 
     g_targetWindow = target_window;
     g_triggerMessage = trigger_message;
+    g_enabled = true;
     g_hook = SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardHookProc, GetModuleHandleW(nullptr), 0);
 
     if (g_hook == nullptr) {
@@ -67,6 +69,11 @@ bool Start(HWND target_window, UINT trigger_message) {
     return true;
 }
 
+void SetEnabled(bool enabled) {
+    g_enabled = enabled;
+    CancelCandidate();
+}
+
 void Stop() {
     if (g_hook != nullptr) {
         UnhookWindowsHookEx(g_hook);
@@ -75,6 +82,7 @@ void Stop() {
 
     g_targetWindow = nullptr;
     g_triggerMessage = 0;
+    g_enabled = true;
     CancelCandidate();
 }
 

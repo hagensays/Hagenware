@@ -1,5 +1,6 @@
 #include <windows.h>
 
+#include "input_dismiss.h"
 #include "trigger.h"
 #include "window_switcher.h"
 
@@ -8,6 +9,10 @@ constexpr wchar_t kClassName[] = L"HagenwareWindow";
 constexpr wchar_t kWindowTitle[] = L"Hagenware";
 constexpr wchar_t kMessage[] = L"Hagenware v0.1.3";
 constexpr UINT kTriggerMessage = WM_APP + 1;
+
+void SetTriggerEnabled(bool enabled) {
+    Trigger::SetEnabled(enabled);
+}
 
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
@@ -72,6 +77,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
         return 1;
     }
 
+    if (!InputDismiss::Start(SetTriggerEnabled)) {
+        Trigger::Stop();
+        WindowSwitcher::Shutdown();
+        DestroyWindow(window);
+        return 1;
+    }
+
     ShowWindow(window, show_command);
 
     MSG message{};
@@ -80,6 +92,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
         DispatchMessageW(&message);
     }
 
+    InputDismiss::Stop();
     Trigger::Stop();
     WindowSwitcher::Shutdown();
 

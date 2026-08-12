@@ -1,16 +1,16 @@
 #include "input_dismiss.h"
 
-#include "window_placement.h"
-#include "window_switcher.h"
+#include "deck.h"
+#include "grid.h"
 
 namespace {
-constexpr wchar_t kSwitcherClassName[] = L"HagenwareWindowSwitcher";
-constexpr wchar_t kPlacementClassName[] = L"HagenwareWindowPlacement";
+constexpr wchar_t kDeckClassName[] = L"HagenwareDeck";
+constexpr wchar_t kGridClassName[] = L"HagenwareGrid";
 
 enum class SurfaceKind {
     None,
-    Switcher,
-    Placement,
+    Deck,
+    Grid,
 };
 
 HWINEVENTHOOK g_windowEventHook = nullptr;
@@ -29,7 +29,7 @@ bool IsControlKey(DWORD virtual_key) {
 }
 
 bool IsProgrammedKey(SurfaceKind surface, DWORD virtual_key) {
-    if (surface == SurfaceKind::Switcher) {
+    if (surface == SurfaceKind::Deck) {
         return virtual_key == VK_LEFT ||
             virtual_key == VK_UP ||
             virtual_key == VK_RIGHT ||
@@ -38,7 +38,7 @@ bool IsProgrammedKey(SurfaceKind surface, DWORD virtual_key) {
             virtual_key == VK_ESCAPE;
     }
 
-    if (surface == SurfaceKind::Placement) {
+    if (surface == SurfaceKind::Grid) {
         return virtual_key >= VK_NUMPAD1 && virtual_key <= VK_NUMPAD9;
     }
 
@@ -46,10 +46,10 @@ bool IsProgrammedKey(SurfaceKind surface, DWORD virtual_key) {
 }
 
 bool IsOwnTriggerKey(SurfaceKind surface, DWORD virtual_key) {
-    if (surface == SurfaceKind::Switcher) {
+    if (surface == SurfaceKind::Deck) {
         return IsShiftKey(virtual_key);
     }
-    if (surface == SurfaceKind::Placement) {
+    if (surface == SurfaceKind::Grid) {
         return IsControlKey(virtual_key);
     }
     return false;
@@ -75,11 +75,11 @@ SurfaceKind SurfaceForWindow(HWND window) {
         return SurfaceKind::None;
     }
 
-    if (lstrcmpW(class_name, kSwitcherClassName) == 0) {
-        return SurfaceKind::Switcher;
+    if (lstrcmpW(class_name, kDeckClassName) == 0) {
+        return SurfaceKind::Deck;
     }
-    if (lstrcmpW(class_name, kPlacementClassName) == 0) {
-        return SurfaceKind::Placement;
+    if (lstrcmpW(class_name, kGridClassName) == 0) {
+        return SurfaceKind::Grid;
     }
     return SurfaceKind::None;
 }
@@ -100,10 +100,10 @@ void StopInputHooks() {
 }
 
 void DismissSurfaceForPassThrough() {
-    if (g_surfaceKind == SurfaceKind::Switcher) {
-        WindowSwitcher::DismissForPassThrough();
-    } else if (g_surfaceKind == SurfaceKind::Placement) {
-        WindowPlacement::DismissForPassThrough();
+    if (g_surfaceKind == SurfaceKind::Deck) {
+        Deck::DismissForPassThrough();
+    } else if (g_surfaceKind == SurfaceKind::Grid) {
+        Grid::DismissForPassThrough();
     }
 }
 

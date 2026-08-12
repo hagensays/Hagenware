@@ -1,9 +1,6 @@
 #include "window_switcher.h"
 
 #include <dwmapi.h>
-#include <objidl.h>
-#include <shlwapi.h>
-#include <wincodec.h>
 
 #include <string>
 #include <vector>
@@ -18,8 +15,6 @@ constexpr int kPreviewInset = 8;
 constexpr int kPreviewHeight = 108;
 constexpr int kMonitorMargin = 40;
 constexpr int kSelectionThickness = 3;
-constexpr int kGlamourWidth = 480;
-constexpr int kGlamourHeight = 180;
 
 struct WindowEntry {
     HWND window = nullptr;
@@ -34,86 +29,6 @@ int g_selected = 0;
 int g_firstVisible = 0;
 int g_visibleCount = 0;
 bool g_hiding = false;
-HBITMAP g_glamour = nullptr;
-int g_glamourSourceWidth = 0;
-int g_glamourSourceHeight = 0;
-int g_contentWidth = 0;
-bool g_comInitialized = false;
-
-HBITMAP LoadGlamourBitmap(const std::wstring& path) {
-    IStream* stream = nullptr;
-    if (FAILED(SHCreateStreamOnFileEx(path.c_str(), STGM_READ | STGM_SHARE_DENY_WRITE, 0, FALSE, nullptr, &stream))) {
-        return nullptr;
-    }
-
-    IWICImagingFactory* factory = nullptr;
-    IWICBitmapDecoder* decoder = nullptr;
-    IWICBitmapFrameDecode* frame = nullptr;
-    IWICFormatConverter* converter = nullptr;
-    HBITMAP bitmap = nullptr;
-
-    do {
-        if (FAILED(CoCreateInstance(
-                CLSID_WICImagingFactory,
-                nullptr,
-                CLSCTX_INPROC_SERVER,
-                IID_PPV_ARGS(&factory)))) {
-            break;
-        }
-        if (FAILED(factory->CreateDecoderFromStream(
-                stream,
-                nullptr,
-                WICDecodeMetadataCacheOnLoad,
-                &decoder)) ||
-            FAILED(decoder->GetFrame(0, &frame)) ||
-            FAILED(factory->CreateFormatConverter(&converter)) ||
-            FAILED(converter->Initialize(
-                frame,
-                GUID_WICPixelFormat32bppPBGRA,
-                WICBitmapDitherTypeNone,
-                nullptr,
-                0.0,
-                WICBitmapPaletteTypeCustom))) {
-            break;
-        }
-
-        UINT width = 0;
-        UINT height = 0;
-        if (FAILED(converter->GetSize(&width, &height)) || width == 0 || height == 0) {
-            break;
-        }
-
-        BITMAPINFO bitmap_info{};
-        bitmap_info.bmiHeader.biSize = sizeof(bitmap_info.bmiHeader);
-        bitmap_info.bmiHeader.biWidth = static_cast<LONG>(width);
-        bitmap_info.bmiHeader.biHeight = -static_cast<LONG>(height);
-        bitmap_info.bmiHeader.biPlanes = 1;
-        bitmap_info.bmiHeader.biBitCount = 32;
-        bitmap_info.bmiHeader.biCompression = BI_RGB;
-
-        void* pixels = nullptr;
-        HDC screen = GetDC(nullptr);
-        bitmap = CreateDIBSection(screen, &bitmap_info, DIB_RGB_COLORS, &pixels, nullptr, 0);
-        ReleaseDC(nullptr, screen);
-        if (bitmap == nullptr || pixels == nullptr ||
-            FAILED(converter->CopyPixels(nullptr, width * 4, width * height * 4, static_cast<BYTE*>(pixels)))) {
-            if (bitmap != nullptr) {
-                DeleteObject(bitmap);
-                bitmap = nullptr;
-            }
-        } else {
-            g_glamourSourceWidth = static_cast<int>(width);
-            g_glamourSourceHeight = static_cast<int>(height);
-        }
-    } while (false);
-
-    if (converter != nullptr) converter->Release();
-    if (frame != nullptr) frame->Release();
-    if (decoder != nullptr) decoder->Release();
-    if (factory != nullptr) factory->Release();
-    stream->Release();
-    return bitmap;
-}
 
 bool IsCandidateWindow(HWND window) {
     if (window == nullptr || window == g_window || window == GetShellWindow() || IsWindowVisible(window) == FALSE) {
@@ -175,8 +90,7 @@ void RefreshEntries() {
 }
 
 RECT CardRect(int slot) {
-    const int cards_width = (g_visibleCount * kCardWidth) + ((g_visibleCount - 1) * kGap);
-    const LONG left = static_cast<LONG>((g_contentWidth - cards_width) / 2 + slot * (kCardWidth + kGap));
+    const LONG left = static_cast<LONG>(kPadding + slot * (kCardWidth + kGap));
     const LONG top = kPadding;
     return RECT{left, top, left + kCardWidth, top + kCardHeight};
 }
@@ -366,26 +280,6 @@ void PaintSwitcher(HWND window) {
     SetTextColor(dc, RGB(0, 0, 0));
     HGDIOBJ previous_font = SelectObject(dc, GetStockObject(DEFAULT_GUI_FONT));
 
-    if (g_glamour != nullptr) {
-        HDC image_dc = CreateCompatibleDC(dc);
-        HGDIOBJ previous_image = SelectObject(image_dc, g_glamour);
-        const int left = (g_contentWidth - kGlamourWidth) / 2;
-        StretchBlt(
-            dc,
-            left,
-            kPadding + kCardHeight + kGap,
-            kGlamourWidth,
-            kGlamourHeight,
-            image_dc,
-            0,
-            0,
-            g_glamourSourceWidth,
-            g_glamourSourceHeight,
-            SRCCOPY);
-        SelectObject(image_dc, previous_image);
-        DeleteDC(image_dc);
-    }
-
     for (int slot = 0; slot < g_visibleCount; ++slot) {
         const int index = g_firstVisible + slot;
         if (index >= static_cast<int>(g_entries.size())) {
@@ -449,10 +343,10 @@ void PositionSwitcher(HWND anchor) {
     const int entry_count = static_cast<int>(g_entries.size());
     g_visibleCount = entry_count < max_visible ? entry_count : max_visible;
 
-    const int cards_width = (g_visibleCount * kCardWidth) + ((g_visibleCount - 1) * kGap);
-    g_contentWidth = cards_width > kGlamourWidth ? cards_width : kGlamourWidth;
-    const int window_width = (2 * kPadding) + g_contentWidth;
-    const int window_height = (2 * kPadding) + kGlamourHeight + kGap + kCardHeight;
+    const int window_width = (2 * kPadding) +
+        (g_visibleCount * kCardWidth) +
+        ((g_visibleCount - 1) * kGap);
+    const int window_height = (2 * kPadding) + kCardHeight;
     const int x = work_area.left + (work_width - window_width) / 2;
     const int y = work_area.top + (work_height - window_height) / 2;
 
@@ -549,41 +443,6 @@ bool Initialize(HINSTANCE instance) {
         return false;
     }
 
-    HRESULT com_result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    if (FAILED(com_result)) {
-        DestroyWindow(g_window);
-        g_window = nullptr;
-        UnregisterClassW(kSwitcherClassName, instance);
-        g_instance = nullptr;
-        return false;
-    }
-    g_comInitialized = true;
-
-    wchar_t module_path[MAX_PATH]{};
-    if (GetModuleFileNameW(nullptr, module_path, ARRAYSIZE(module_path)) == 0) {
-        CoUninitialize();
-        g_comInitialized = false;
-        DestroyWindow(g_window);
-        g_window = nullptr;
-        UnregisterClassW(kSwitcherClassName, instance);
-        g_instance = nullptr;
-        return false;
-    }
-    std::wstring data_directory(module_path);
-    const size_t separator = data_directory.find_last_of(L"\\/");
-    data_directory.resize(separator == std::wstring::npos ? 0 : separator + 1);
-    data_directory += L"Hagenware Data\\";
-    g_glamour = LoadGlamourBitmap(data_directory + L"human.png");
-    if (g_glamour == nullptr) {
-        CoUninitialize();
-        g_comInitialized = false;
-        DestroyWindow(g_window);
-        g_window = nullptr;
-        UnregisterClassW(kSwitcherClassName, instance);
-        g_instance = nullptr;
-        return false;
-    }
-
     return true;
 }
 
@@ -644,17 +503,6 @@ void Shutdown() {
     if (g_instance != nullptr) {
         UnregisterClassW(kSwitcherClassName, g_instance);
         g_instance = nullptr;
-    }
-
-    if (g_glamour != nullptr) {
-        DeleteObject(g_glamour);
-        g_glamour = nullptr;
-    }
-    g_glamourSourceWidth = 0;
-    g_glamourSourceHeight = 0;
-    if (g_comInitialized) {
-        CoUninitialize();
-        g_comInitialized = false;
     }
 }
 

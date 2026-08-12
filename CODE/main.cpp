@@ -5,6 +5,8 @@
 #include "deck.h"
 #include "grid.h"
 #include "input_dismiss.h"
+#include "instance_handoff.h"
+#include "lifecycle.h"
 #include "trigger.h"
 #include "version.h"
 
@@ -20,12 +22,27 @@ void SuppressTriggerModifier(DWORD virtual_key) {
 }
 
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    const UINT query_version_message = InstanceHandoff::QueryVersionMessage();
+    if (query_version_message != 0 && message == query_version_message) {
+        return static_cast<LRESULT>(Version::kPacked);
+    }
+
+    const UINT retire_message = InstanceHandoff::RetireWhenIdleMessage();
+    if (retire_message != 0 && message == retire_message) {
+        Lifecycle::RequestRetire();
+        return 1;
+    }
+
     switch (message) {
     case kShiftTriggerMessage:
-        Deck::Show();
+        if (!Lifecycle::IsRetiring()) {
+            Deck::Show();
+        }
         return 0;
     case kControlTriggerMessage:
-        Grid::Show();
+        if (!Lifecycle::IsRetiring()) {
+            Grid::Show();
+        }
         return 0;
     case WM_PAINT: {
         PAINTSTRUCT paint{};
@@ -36,6 +53,9 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
         EndPaint(window, &paint);
         return 0;
     }
+    case WM_CLOSE:
+        DestroyWindow(window);
+        return 0;
     case WM_DESTROY:
         PostQuitMessage(0);
         return 0;
@@ -43,9 +63,20 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
         return DefWindowProcW(window, message, wparam, lparam);
     }
 }
+
+void DestroyHostWindow(HWND window, HINSTANCE instance) {
+    if (window != nullptr && IsWindow(window) != FALSE) {
+        DestroyWindow(window);
+    }
+    UnregisterClassW(kClassName, instance);
+}
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
+    if (!InstanceHandoff::BeginStartup()) {
+        return 1;
+    }
+
     WNDCLASSW window_class{};
     window_class.lpfnWndProc = WindowProc;
     window_class.hInstance = instance;
@@ -53,6 +84,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
     window_class.lpszClassName = kClassName;
 
     if (RegisterClassW(&window_class) == 0) {
+        InstanceHandoff::EndStartup();
         return 1;
     }
 
@@ -71,24 +103,43 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
         nullptr);
 
     if (window == nullptr) {
+        UnregisterClassW(kClassName, instance);
+        InstanceHandoff::EndStartup();
         return 1;
     }
 
+    Lifecycle::Initialize(window);
+
+    const InstanceHandoff::StartupResult handoff =
+        InstanceHandoff::ResolvePreviousInstances(window, Version::kPacked);
+    if (handoff != InstanceHandoff::StartupResult::Continue) {
+        Lifecycle::Shutdown();
+        DestroyHostWindow(window, instance);
+        InstanceHandoff::EndStartup();
+        return handoff == InstanceHandoff::StartupResult::ExistingSameOrNewer ? 0 : 1;
+    }
+
     if (!Deck::Initialize(instance)) {
-        DestroyWindow(window);
+        Lifecycle::Shutdown();
+        DestroyHostWindow(window, instance);
+        InstanceHandoff::EndStartup();
         return 1;
     }
 
     if (!Grid::Initialize(instance)) {
         Deck::Shutdown();
-        DestroyWindow(window);
+        Lifecycle::Shutdown();
+        DestroyHostWindow(window, instance);
+        InstanceHandoff::EndStartup();
         return 1;
     }
 
     if (!Trigger::Start(window, kShiftTriggerMessage, kControlTriggerMessage)) {
         Grid::Shutdown();
         Deck::Shutdown();
-        DestroyWindow(window);
+        Lifecycle::Shutdown();
+        DestroyHostWindow(window, instance);
+        InstanceHandoff::EndStartup();
         return 1;
     }
 
@@ -96,10 +147,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
         Trigger::Stop();
         Grid::Shutdown();
         Deck::Shutdown();
-        DestroyWindow(window);
+        Lifecycle::Shutdown();
+        DestroyHostWindow(window, instance);
+        InstanceHandoff::EndStartup();
         return 1;
     }
 
+    InstanceHandoff::EndStartup();
     ShowWindow(window, show_command);
 
     MSG message{};
@@ -112,6 +166,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
     Grid::Shutdown();
     Trigger::Stop();
     Deck::Shutdown();
+    Lifecycle::Shutdown();
+    UnregisterClassW(kClassName, instance);
 
     return static_cast<int>(message.wParam);
 }

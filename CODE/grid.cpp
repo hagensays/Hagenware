@@ -1,5 +1,7 @@
 #include "grid.h"
 
+#include "lifecycle.h"
+
 namespace {
 constexpr wchar_t kGridClassName[] = L"HagenwareGrid";
 constexpr int kPadding = 10;
@@ -30,6 +32,7 @@ HINSTANCE g_instance = nullptr;
 HWND g_window = nullptr;
 HWND g_targetWindow = nullptr;
 bool g_hiding = false;
+bool g_activityActive = false;
 
 bool IsCandidateTarget(HWND window) {
     return window != nullptr &&
@@ -342,6 +345,11 @@ void Show() {
     }
 
     g_targetWindow = target;
+    if (!g_activityActive) {
+        Lifecycle::BeginActivity();
+        g_activityActive = true;
+    }
+
     PositionGrid(target);
     InvalidateRect(g_window, nullptr, FALSE);
     UpdateWindow(g_window);
@@ -358,6 +366,12 @@ void Hide() {
         ShowWindow(g_window, SW_HIDE);
     }
     g_targetWindow = nullptr;
+
+    if (g_activityActive) {
+        g_activityActive = false;
+        Lifecycle::EndActivity();
+    }
+
     g_hiding = false;
 }
 

@@ -36,7 +36,7 @@ bool IsProgrammedKey(SurfaceKind surface, DWORD virtual_key) {
             virtual_key == VK_DOWN ||
             virtual_key == VK_SPACE ||
             virtual_key == VK_ESCAPE ||
-            (virtual_key >= '1' && virtual_key <= '9');
+            (virtual_key >= L'1' && virtual_key <= L'9');
     }
 
     if (surface == SurfaceKind::Grid) {

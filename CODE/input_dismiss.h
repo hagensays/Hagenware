@@ -4,9 +4,17 @@
 
 namespace InputDismiss {
 
-using SuppressModifierCallback = void (*)(DWORD virtual_key);
+enum class KeyboardAction {
+    PassThrough,
+    Consume,
+    SuppressTrigger,
+};
 
-bool Start(SuppressModifierCallback suppress_modifier_until_release);
+bool Start();
+bool ActivateDeck(HWND window);
+bool ActivateGrid(HWND window);
+void Deactivate(HWND window);
+KeyboardAction HandleKeyboard(DWORD virtual_key, bool key_down, bool key_up);
 void Stop();
 
 } // namespace InputDismiss

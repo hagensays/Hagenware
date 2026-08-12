@@ -6,10 +6,13 @@
 #include <string>
 #include <vector>
 
+#include "input_dismiss.h"
 #include "lifecycle.h"
+#include "screenshot.h"
 
 namespace {
 constexpr wchar_t kDeckClassName[] = L"HagenwareDeck";
+constexpr UINT kDeferredCleanupMessage = WM_APP + 1;
 constexpr int kPadding = 12;
 constexpr int kGap = 10;
 constexpr int kCardWidth = 210;
@@ -39,6 +42,7 @@ int g_firstVisible = 0;
 int g_visibleCount = 0;
 bool g_hiding = false;
 bool g_activityActive = false;
+bool g_cleanupPending = false;
 
 bool IsCandidateWindow(HWND window) {
     if (window == nullptr || window == g_window || window == GetShellWindow() || IsWindowVisible(window) == FALSE) {
@@ -131,6 +135,29 @@ void ClearThumbnails() {
 void ClearEntries() {
     ClearThumbnails();
     g_entries.clear();
+}
+
+void FinishPendingCleanup() {
+    if (!g_cleanupPending) {
+        return;
+    }
+
+    ClearEntries();
+    g_cleanupPending = false;
+}
+
+void ResetInteractionState() {
+    g_returnWindow = nullptr;
+    g_selected = 0;
+    g_firstVisible = 0;
+    g_visibleCount = 0;
+}
+
+void EndActivityIfActive() {
+    if (g_activityActive) {
+        g_activityActive = false;
+        Lifecycle::EndActivity();
+    }
 }
 
 size_t RecentRank(HWND window) {
@@ -522,6 +549,11 @@ LRESULT CALLBACK DeckWindowProc(HWND window, UINT message, WPARAM wparam, LPARAM
         return 0;
     case WM_ERASEBKGND:
         return 1;
+    case kDeferredCleanupMessage:
+        if (g_cleanupPending && IsWindowVisible(window) == FALSE) {
+            FinishPendingCleanup();
+        }
+        return 0;
     case WM_KEYDOWN:
         if (wparam >= L'1' && wparam <= L'9') {
             ActivateNumberedEntry(static_cast<int>(wparam - L'1'));
@@ -566,7 +598,8 @@ LRESULT CALLBACK DeckWindowProc(HWND window, UINT message, WPARAM wparam, LPARAM
         return 0;
     case WM_DESTROY:
         ClearEntries();
-        g_returnWindow = nullptr;
+        g_cleanupPending = false;
+        ResetInteractionState();
         return 0;
     default:
         break;
@@ -670,6 +703,8 @@ void Show() {
         return;
     }
 
+    FinishPendingCleanup();
+
     HWND foreground = GetForegroundWindow();
     RememberWindow(foreground);
     RefreshEntries();
@@ -687,11 +722,17 @@ void Show() {
     }
 
     PositionDeck(foreground);
+    if (!InputDismiss::ActivateDeck(g_window)) {
+        DismissForPassThrough();
+        return;
+    }
+
     EnsureSelectedVisible();
     UpdateWindow(g_window);
     RegisterThumbnails();
     UpdateThumbnailLayout();
     InvalidateRect(g_window, nullptr, FALSE);
+    Screenshot::ShowIndicatorForDeck(g_window);
     FocusDeck();
 }
 
@@ -701,27 +742,50 @@ void Hide() {
     }
 
     g_hiding = true;
+    InputDismiss::Deactivate(g_window);
+    Screenshot::HideIndicator();
+
     if (IsWindowVisible(g_window) != FALSE) {
         ShowWindow(g_window, SW_HIDE);
     }
+
     ClearEntries();
-    g_returnWindow = nullptr;
-    g_selected = 0;
-    g_firstVisible = 0;
-    g_visibleCount = 0;
-
-    if (g_activityActive) {
-        g_activityActive = false;
-        Lifecycle::EndActivity();
-    }
-
+    g_cleanupPending = false;
+    ResetInteractionState();
+    EndActivityIfActive();
     g_hiding = false;
 }
 
 void DismissForPassThrough() {
+    if (g_window == nullptr || g_hiding) {
+        return;
+    }
+
     HWND target = g_returnWindow;
-    Hide();
+    g_hiding = true;
+    InputDismiss::Deactivate(g_window);
+    Screenshot::HideIndicator();
+
+    if (IsWindowVisible(g_window) != FALSE) {
+        ShowWindow(g_window, SW_HIDE);
+    }
+
+    ResetInteractionState();
+    EndActivityIfActive();
+
+    if (!g_entries.empty()) {
+        g_cleanupPending = true;
+        if (PostMessageW(g_window, kDeferredCleanupMessage, 0, 0) == FALSE) {
+            FinishPendingCleanup();
+        }
+    }
+
+    g_hiding = false;
     ActivateWindow(target);
+}
+
+bool IsVisible() {
+    return g_window != nullptr && IsWindowVisible(g_window) != FALSE;
 }
 
 void Shutdown() {

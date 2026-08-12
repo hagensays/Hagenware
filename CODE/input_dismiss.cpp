@@ -5,21 +5,16 @@
 #include "screenshot.h"
 
 namespace {
-constexpr wchar_t kDeckClassName[] = L"HagenwareDeck";
-constexpr wchar_t kGridClassName[] = L"HagenwareGrid";
-
 enum class SurfaceKind {
     None,
     Deck,
     Grid,
 };
 
-HWINEVENTHOOK g_windowEventHook = nullptr;
-HHOOK g_keyboardHook = nullptr;
+HINSTANCE g_module = nullptr;
 HHOOK g_mouseHook = nullptr;
 HWND g_surfaceWindow = nullptr;
 SurfaceKind g_surfaceKind = SurfaceKind::None;
-InputDismiss::SuppressModifierCallback g_suppressModifier = nullptr;
 
 bool IsShiftKey(DWORD virtual_key) {
     return virtual_key == VK_SHIFT || virtual_key == VK_LSHIFT || virtual_key == VK_RSHIFT;
@@ -80,35 +75,10 @@ bool IsPointInsideActiveSurface(const POINT& point) {
     return PtInRect(&surface_rect, point) != FALSE;
 }
 
-SurfaceKind SurfaceForWindow(HWND window) {
-    if (window == nullptr) {
-        return SurfaceKind::None;
-    }
-
-    wchar_t class_name[64]{};
-    const int capacity = static_cast<int>(sizeof(class_name) / sizeof(class_name[0]));
-    if (GetClassNameW(window, class_name, capacity) <= 0) {
-        return SurfaceKind::None;
-    }
-
-    if (lstrcmpW(class_name, kDeckClassName) == 0) {
-        return SurfaceKind::Deck;
-    }
-    if (lstrcmpW(class_name, kGridClassName) == 0) {
-        return SurfaceKind::Grid;
-    }
-    return SurfaceKind::None;
-}
-
-void StopInputHooks() {
+void StopMouseHook() {
     if (g_mouseHook != nullptr) {
         UnhookWindowsHookEx(g_mouseHook);
         g_mouseHook = nullptr;
-    }
-
-    if (g_keyboardHook != nullptr) {
-        UnhookWindowsHookEx(g_keyboardHook);
-        g_keyboardHook = nullptr;
     }
 
     g_surfaceWindow = nullptr;
@@ -116,35 +86,12 @@ void StopInputHooks() {
 }
 
 void DismissSurfaceForPassThrough() {
-    if (g_surfaceKind == SurfaceKind::Deck) {
+    const SurfaceKind surface = g_surfaceKind;
+    if (surface == SurfaceKind::Deck) {
         Deck::DismissForPassThrough();
-    } else if (g_surfaceKind == SurfaceKind::Grid) {
+    } else if (surface == SurfaceKind::Grid) {
         Grid::DismissForPassThrough();
     }
-}
-
-LRESULT CALLBACK KeyboardHookProc(int code, WPARAM wparam, LPARAM lparam) {
-    if (code == HC_ACTION &&
-        g_surfaceWindow != nullptr &&
-        IsWindowVisible(g_surfaceWindow) != FALSE &&
-        (wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN)) {
-        const auto* key = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lparam);
-
-        if (g_surfaceKind == SurfaceKind::Deck && key->vkCode == VK_SNAPSHOT) {
-            Screenshot::RequestCapture();
-            return 1;
-        }
-
-        if (!IsProgrammedKey(g_surfaceKind, key->vkCode)) {
-            if (IsOwnTriggerKey(g_surfaceKind, key->vkCode) && g_suppressModifier != nullptr) {
-                g_suppressModifier(key->vkCode);
-            }
-
-            DismissSurfaceForPassThrough();
-        }
-    }
-
-    return CallNextHookEx(nullptr, code, wparam, lparam);
 }
 
 LRESULT CALLBACK MouseHookProc(int code, WPARAM wparam, LPARAM lparam) {
@@ -161,97 +108,88 @@ LRESULT CALLBACK MouseHookProc(int code, WPARAM wparam, LPARAM lparam) {
     return CallNextHookEx(nullptr, code, wparam, lparam);
 }
 
-void StartInputHooks(HWND surface_window, SurfaceKind surface_kind) {
-    StopInputHooks();
-    g_surfaceWindow = surface_window;
-    g_surfaceKind = surface_kind;
-
-    g_keyboardHook = SetWindowsHookExW(
-        WH_KEYBOARD_LL,
-        KeyboardHookProc,
-        GetModuleHandleW(nullptr),
-        0);
-
-    if (g_keyboardHook == nullptr) {
-        PostMessageW(surface_window, WM_CLOSE, 0, 0);
-        g_surfaceWindow = nullptr;
-        g_surfaceKind = SurfaceKind::None;
-        return;
+bool ActivateSurface(HWND window, SurfaceKind surface) {
+    if (g_module == nullptr || window == nullptr || surface == SurfaceKind::None) {
+        return false;
     }
+
+    StopMouseHook();
+    g_surfaceWindow = window;
+    g_surfaceKind = surface;
 
     g_mouseHook = SetWindowsHookExW(
         WH_MOUSE_LL,
         MouseHookProc,
-        GetModuleHandleW(nullptr),
+        g_module,
         0);
 
     if (g_mouseHook == nullptr) {
-        PostMessageW(surface_window, WM_CLOSE, 0, 0);
-        StopInputHooks();
-    }
-}
-
-void CALLBACK WindowEventProc(
-    HWINEVENTHOOK,
-    DWORD event,
-    HWND window,
-    LONG object_id,
-    LONG child_id,
-    DWORD,
-    DWORD) {
-    if (object_id != OBJID_WINDOW || child_id != CHILDID_SELF) {
-        return;
-    }
-
-    const SurfaceKind surface = SurfaceForWindow(window);
-    if (surface == SurfaceKind::None) {
-        return;
-    }
-
-    if (event == EVENT_OBJECT_SHOW) {
-        StartInputHooks(window, surface);
-    } else if (event == EVENT_OBJECT_HIDE && window == g_surfaceWindow) {
-        StopInputHooks();
-    }
-}
-} // namespace
-
-namespace InputDismiss {
-
-bool Start(SuppressModifierCallback suppress_modifier_until_release) {
-    Stop();
-
-    if (suppress_modifier_until_release == nullptr) {
-        return false;
-    }
-
-    g_suppressModifier = suppress_modifier_until_release;
-    g_windowEventHook = SetWinEventHook(
-        EVENT_OBJECT_SHOW,
-        EVENT_OBJECT_HIDE,
-        nullptr,
-        WindowEventProc,
-        GetCurrentProcessId(),
-        0,
-        WINEVENT_OUTOFCONTEXT);
-
-    if (g_windowEventHook == nullptr) {
-        g_suppressModifier = nullptr;
+        g_surfaceWindow = nullptr;
+        g_surfaceKind = SurfaceKind::None;
         return false;
     }
 
     return true;
 }
+} // namespace
 
-void Stop() {
-    StopInputHooks();
+namespace InputDismiss {
 
-    if (g_windowEventHook != nullptr) {
-        UnhookWinEvent(g_windowEventHook);
-        g_windowEventHook = nullptr;
+bool Start() {
+    Stop();
+    g_module = GetModuleHandleW(nullptr);
+    return g_module != nullptr;
+}
+
+bool ActivateDeck(HWND window) {
+    return ActivateSurface(window, SurfaceKind::Deck);
+}
+
+bool ActivateGrid(HWND window) {
+    return ActivateSurface(window, SurfaceKind::Grid);
+}
+
+void Deactivate(HWND window) {
+    if (window != nullptr && window == g_surfaceWindow) {
+        StopMouseHook();
+    }
+}
+
+KeyboardAction HandleKeyboard(DWORD virtual_key, bool key_down, bool key_up) {
+    if (g_surfaceWindow == nullptr || g_surfaceKind == SurfaceKind::None) {
+        return KeyboardAction::PassThrough;
     }
 
-    g_suppressModifier = nullptr;
+    if (IsWindowVisible(g_surfaceWindow) == FALSE) {
+        StopMouseHook();
+        return KeyboardAction::PassThrough;
+    }
+
+    if (g_surfaceKind == SurfaceKind::Deck && virtual_key == VK_SNAPSHOT) {
+        if (key_down) {
+            Screenshot::RequestCapture();
+        }
+        if (key_down || key_up) {
+            return KeyboardAction::Consume;
+        }
+    }
+
+    if (IsProgrammedKey(g_surfaceKind, virtual_key)) {
+        return KeyboardAction::PassThrough;
+    }
+
+    if (!key_down) {
+        return KeyboardAction::PassThrough;
+    }
+
+    const bool own_trigger = IsOwnTriggerKey(g_surfaceKind, virtual_key);
+    DismissSurfaceForPassThrough();
+    return own_trigger ? KeyboardAction::SuppressTrigger : KeyboardAction::PassThrough;
+}
+
+void Stop() {
+    StopMouseHook();
+    g_module = nullptr;
 }
 
 } // namespace InputDismiss

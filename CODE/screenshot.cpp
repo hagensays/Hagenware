@@ -7,7 +7,6 @@
 
 namespace {
 constexpr wchar_t kIndicatorClassName[] = L"HagenwareScreenshotIndicator";
-constexpr wchar_t kDeckClassName[] = L"HagenwareDeck";
 constexpr UINT kCaptureMessage = WM_APP + 1;
 constexpr int kIndicatorWidth = 22;
 constexpr int kIndicatorHeight = 18;
@@ -16,50 +15,35 @@ constexpr DWORD kModulePathCapacity = 32768;
 
 HINSTANCE g_instance = nullptr;
 HWND g_indicatorWindow = nullptr;
-HWINEVENTHOOK g_deckEventHook = nullptr;
+HWND g_deckWindow = nullptr;
 
-bool IsDeckWindow(HWND window) {
-    if (window == nullptr) {
-        return false;
-    }
-
-    wchar_t class_name[64]{};
-    const int capacity = static_cast<int>(sizeof(class_name) / sizeof(class_name[0]));
-    return GetClassNameW(window, class_name, capacity) > 0 &&
-        lstrcmpW(class_name, kDeckClassName) == 0;
-}
-
-HWND FindDeckWindow() {
-    return FindWindowW(kDeckClassName, nullptr);
-}
-
-void PositionIndicator(HWND deck_window) {
+bool PositionIndicator(HWND deck_window) {
     if (g_indicatorWindow == nullptr || deck_window == nullptr) {
-        return;
+        return false;
     }
 
     MONITORINFO monitor_info{};
     monitor_info.cbSize = sizeof(monitor_info);
     const HMONITOR monitor = MonitorFromWindow(deck_window, MONITOR_DEFAULTTONEAREST);
     if (GetMonitorInfoW(monitor, &monitor_info) == FALSE) {
-        return;
+        return false;
     }
 
     const RECT& work_area = monitor_info.rcWork;
     const int x = static_cast<int>(work_area.right) - kIndicatorWidth - kIndicatorMargin;
     const int y = static_cast<int>(work_area.top) + kIndicatorMargin;
 
-    SetWindowPos(
+    return SetWindowPos(
         g_indicatorWindow,
         HWND_TOPMOST,
         x,
         y,
         kIndicatorWidth,
         kIndicatorHeight,
-        SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        SWP_NOACTIVATE | SWP_SHOWWINDOW) != FALSE;
 }
 
-void HideIndicator() {
+void HideIndicatorWindow() {
     if (g_indicatorWindow != nullptr && IsWindowVisible(g_indicatorWindow) != FALSE) {
         ShowWindow(g_indicatorWindow, SW_HIDE);
     }
@@ -323,34 +307,15 @@ LRESULT CALLBACK IndicatorWindowProc(HWND window, UINT message, WPARAM wparam, L
         return 1;
     case WM_NCHITTEST:
         return HTTRANSPARENT;
-    case kCaptureMessage: {
-        HWND deck_window = FindDeckWindow();
-        if (deck_window != nullptr && IsWindowVisible(deck_window) != FALSE) {
+    case kCaptureMessage:
+        if (g_deckWindow != nullptr &&
+            IsWindow(g_deckWindow) != FALSE &&
+            IsWindowVisible(g_deckWindow) != FALSE) {
             CaptureVirtualDesktop();
         }
         return 0;
-    }
     default:
         return DefWindowProcW(window, message, wparam, lparam);
-    }
-}
-
-void CALLBACK DeckEventProc(
-    HWINEVENTHOOK,
-    DWORD event,
-    HWND window,
-    LONG object_id,
-    LONG child_id,
-    DWORD,
-    DWORD) {
-    if (object_id != OBJID_WINDOW || child_id != CHILDID_SELF || !IsDeckWindow(window)) {
-        return;
-    }
-
-    if (event == EVENT_OBJECT_SHOW && IsWindowVisible(window) != FALSE) {
-        PositionIndicator(window);
-    } else if (event == EVENT_OBJECT_HIDE && IsWindowVisible(window) == FALSE) {
-        HideIndicator();
     }
 }
 } // namespace
@@ -396,37 +361,34 @@ bool Initialize() {
         return false;
     }
 
-    g_deckEventHook = SetWinEventHook(
-        EVENT_OBJECT_SHOW,
-        EVENT_OBJECT_HIDE,
-        nullptr,
-        DeckEventProc,
-        GetCurrentProcessId(),
-        0,
-        WINEVENT_OUTOFCONTEXT);
-
-    if (g_deckEventHook == nullptr) {
-        DestroyWindow(g_indicatorWindow);
-        g_indicatorWindow = nullptr;
-        UnregisterClassW(kIndicatorClassName, g_instance);
-        g_instance = nullptr;
-        return false;
-    }
-
     return true;
 }
 
+void ShowIndicatorForDeck(HWND deck_window) {
+    if (deck_window == nullptr || IsWindow(deck_window) == FALSE) {
+        HideIndicator();
+        return;
+    }
+
+    g_deckWindow = deck_window;
+    if (!PositionIndicator(deck_window)) {
+        HideIndicatorWindow();
+    }
+}
+
+void HideIndicator() {
+    g_deckWindow = nullptr;
+    HideIndicatorWindow();
+}
+
 void RequestCapture() {
-    if (g_indicatorWindow != nullptr) {
+    if (g_indicatorWindow != nullptr && g_deckWindow != nullptr) {
         PostMessageW(g_indicatorWindow, kCaptureMessage, 0, 0);
     }
 }
 
 void Shutdown() {
-    if (g_deckEventHook != nullptr) {
-        UnhookWinEvent(g_deckEventHook);
-        g_deckEventHook = nullptr;
-    }
+    HideIndicator();
 
     if (g_indicatorWindow != nullptr) {
         DestroyWindow(g_indicatorWindow);

@@ -18,10 +18,6 @@ const std::wstring kMessage = std::wstring(L"Hagenware ") + Version::kNumber;
 constexpr UINT kShiftTriggerMessage = WM_APP + 1;
 constexpr UINT kControlTriggerMessage = WM_APP + 2;
 
-void SuppressTriggerModifier(DWORD virtual_key) {
-    Trigger::SuppressModifierUntilRelease(virtual_key);
-}
-
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     const UINT query_version_message = InstanceHandoff::QueryVersionMessage();
     if (query_version_message != 0 && message == query_version_message) {
@@ -36,12 +32,24 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
 
     switch (message) {
     case kShiftTriggerMessage:
+        if (!Trigger::AcceptPostedTrigger(message, wparam)) {
+            return 0;
+        }
         if (!Lifecycle::IsRetiring()) {
+            if (Grid::IsVisible()) {
+                Grid::DismissForPassThrough();
+            }
             Deck::Show();
         }
         return 0;
     case kControlTriggerMessage:
+        if (!Trigger::AcceptPostedTrigger(message, wparam)) {
+            return 0;
+        }
         if (!Lifecycle::IsRetiring()) {
+            if (Deck::IsVisible()) {
+                Deck::DismissForPassThrough();
+            }
             Grid::Show();
         }
         return 0;
@@ -144,7 +152,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
         return 1;
     }
 
-    if (!Trigger::Start(window, kShiftTriggerMessage, kControlTriggerMessage)) {
+    if (!InputDismiss::Start()) {
         Screenshot::Shutdown();
         Grid::Shutdown();
         Deck::Shutdown();
@@ -154,8 +162,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
         return 1;
     }
 
-    if (!InputDismiss::Start(SuppressTriggerModifier)) {
-        Trigger::Stop();
+    if (!Trigger::Start(window, kShiftTriggerMessage, kControlTriggerMessage)) {
+        InputDismiss::Stop();
         Screenshot::Shutdown();
         Grid::Shutdown();
         Deck::Shutdown();
@@ -168,19 +176,31 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
     InstanceHandoff::EndStartup();
     ShowWindow(window, show_command);
 
+    int exit_code = 0;
     MSG message{};
-    while (GetMessageW(&message, nullptr, 0, 0) > 0) {
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
+    for (;;) {
+        const BOOL result = GetMessageW(&message, nullptr, 0, 0);
+        if (result > 0) {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+            continue;
+        }
+
+        if (result == 0) {
+            exit_code = static_cast<int>(message.wParam);
+        } else {
+            exit_code = 1;
+        }
+        break;
     }
 
-    InputDismiss::Stop();
     Trigger::Stop();
+    InputDismiss::Stop();
     Screenshot::Shutdown();
     Grid::Shutdown();
     Deck::Shutdown();
     Lifecycle::Shutdown();
     UnregisterClassW(kClassName, instance);
 
-    return static_cast<int>(message.wParam);
+    return exit_code;
 }

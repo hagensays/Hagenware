@@ -27,6 +27,18 @@ jobs:
             throw "CODE/version.h version must match the release branch name."
           }
 
+          $majorMatch = [regex]::Match($header, 'kMajor\s*=\s*(?<value>\d+)')
+          $minorMatch = [regex]::Match($header, 'kMinor\s*=\s*(?<value>\d+)')
+          $patchMatch = [regex]::Match($header, 'kPatch\s*=\s*(?<value>\d+)')
+          if (-not $majorMatch.Success -or -not $minorMatch.Success -or -not $patchMatch.Success) {
+            throw "CODE/version.h must define numeric major, minor, and patch components."
+          }
+
+          $numericVersion = "v$($majorMatch.Groups['value'].Value).$($minorMatch.Groups['value'].Value).$($patchMatch.Groups['value'].Value)"
+          if ($numericVersion -ne $match.Groups['version'].Value) {
+            throw "CODE/version.h numeric components must match Version::kNumber."
+          }
+
       - name: Build Release x64
         shell: pwsh
         run: |

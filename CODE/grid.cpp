@@ -1,5 +1,6 @@
 #include "grid.h"
 
+#include "input_dismiss.h"
 #include "lifecycle.h"
 
 namespace {
@@ -35,11 +36,17 @@ bool g_hiding = false;
 bool g_activityActive = false;
 
 bool IsCandidateTarget(HWND window) {
-    return window != nullptr &&
-        window != g_window &&
-        window != GetShellWindow() &&
-        IsWindow(window) != FALSE &&
-        IsWindowVisible(window) != FALSE;
+    if (window == nullptr ||
+        window == g_window ||
+        window == GetShellWindow() ||
+        IsWindow(window) == FALSE ||
+        IsWindowVisible(window) == FALSE) {
+        return false;
+    }
+
+    DWORD process_id = 0;
+    GetWindowThreadProcessId(window, &process_id);
+    return process_id != GetCurrentProcessId();
 }
 
 RECT CellRect(int index) {
@@ -351,6 +358,11 @@ void Show() {
     }
 
     PositionGrid(target);
+    if (!InputDismiss::ActivateGrid(g_window)) {
+        CancelAndReturnToTarget();
+        return;
+    }
+
     InvalidateRect(g_window, nullptr, FALSE);
     UpdateWindow(g_window);
     FocusGrid();
@@ -362,6 +374,8 @@ void Hide() {
     }
 
     g_hiding = true;
+    InputDismiss::Deactivate(g_window);
+
     if (IsWindowVisible(g_window) != FALSE) {
         ShowWindow(g_window, SW_HIDE);
     }
@@ -377,6 +391,10 @@ void Hide() {
 
 void DismissForPassThrough() {
     CancelAndReturnToTarget();
+}
+
+bool IsVisible() {
+    return g_window != nullptr && IsWindowVisible(g_window) != FALSE;
 }
 
 void Shutdown() {

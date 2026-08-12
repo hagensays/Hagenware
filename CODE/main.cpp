@@ -5,13 +5,15 @@
 #include "input_dismiss.h"
 #include "trigger.h"
 #include "version.h"
+#include "window_placement.h"
 #include "window_switcher.h"
 
 namespace {
 constexpr wchar_t kClassName[] = L"HagenwareWindow";
 constexpr wchar_t kWindowTitle[] = L"Hagenware";
 const std::wstring kMessage = std::wstring(L"Hagenware ") + Version::kNumber;
-constexpr UINT kTriggerMessage = WM_APP + 1;
+constexpr UINT kShiftTriggerMessage = WM_APP + 1;
+constexpr UINT kControlTriggerMessage = WM_APP + 2;
 
 void SetTriggerEnabled(bool enabled) {
     Trigger::SetEnabled(enabled);
@@ -19,8 +21,11 @@ void SetTriggerEnabled(bool enabled) {
 
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
-    case kTriggerMessage:
+    case kShiftTriggerMessage:
         WindowSwitcher::Show();
+        return 0;
+    case kControlTriggerMessage:
+        WindowPlacement::Show();
         return 0;
     case WM_PAINT: {
         PAINTSTRUCT paint{};
@@ -74,7 +79,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
         return 1;
     }
 
-    if (!Trigger::Start(window, kTriggerMessage)) {
+    if (!WindowPlacement::Initialize(instance, SetTriggerEnabled)) {
+        WindowSwitcher::Shutdown();
+        DestroyWindow(window);
+        return 1;
+    }
+
+    if (!Trigger::Start(window, kShiftTriggerMessage, kControlTriggerMessage)) {
+        WindowPlacement::Shutdown();
         WindowSwitcher::Shutdown();
         DestroyWindow(window);
         return 1;
@@ -82,6 +94,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
 
     if (!InputDismiss::Start(SetTriggerEnabled)) {
         Trigger::Stop();
+        WindowPlacement::Shutdown();
         WindowSwitcher::Shutdown();
         DestroyWindow(window);
         return 1;
@@ -96,6 +109,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
     }
 
     InputDismiss::Stop();
+    WindowPlacement::Shutdown();
     Trigger::Stop();
     WindowSwitcher::Shutdown();
 

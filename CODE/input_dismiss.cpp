@@ -2,6 +2,7 @@
 
 #include "deck.h"
 #include "grid.h"
+#include "screenshot.h"
 
 namespace {
 constexpr wchar_t kDeckClassName[] = L"HagenwareDeck";
@@ -36,6 +37,7 @@ bool IsProgrammedKey(SurfaceKind surface, DWORD virtual_key) {
             virtual_key == VK_DOWN ||
             virtual_key == VK_SPACE ||
             virtual_key == VK_ESCAPE ||
+            virtual_key == VK_SNAPSHOT ||
             (virtual_key >= L'1' && virtual_key <= L'9');
     }
 
@@ -127,6 +129,11 @@ LRESULT CALLBACK KeyboardHookProc(int code, WPARAM wparam, LPARAM lparam) {
         IsWindowVisible(g_surfaceWindow) != FALSE &&
         (wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN)) {
         const auto* key = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lparam);
+
+        if (g_surfaceKind == SurfaceKind::Deck && key->vkCode == VK_SNAPSHOT) {
+            Screenshot::RequestCapture();
+            return 1;
+        }
 
         if (!IsProgrammedKey(g_surfaceKind, key->vkCode)) {
             if (IsOwnTriggerKey(g_surfaceKind, key->vkCode) && g_suppressModifier != nullptr) {

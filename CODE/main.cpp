@@ -7,6 +7,7 @@
 #include "input_dismiss.h"
 #include "instance_handoff.h"
 #include "lifecycle.h"
+#include "screenshot.h"
 #include "trigger.h"
 #include "version.h"
 
@@ -134,7 +135,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
         return 1;
     }
 
+    if (!Screenshot::Initialize()) {
+        Grid::Shutdown();
+        Deck::Shutdown();
+        Lifecycle::Shutdown();
+        DestroyHostWindow(window, instance);
+        InstanceHandoff::EndStartup();
+        return 1;
+    }
+
     if (!Trigger::Start(window, kShiftTriggerMessage, kControlTriggerMessage)) {
+        Screenshot::Shutdown();
         Grid::Shutdown();
         Deck::Shutdown();
         Lifecycle::Shutdown();
@@ -145,6 +156,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
 
     if (!InputDismiss::Start(SuppressTriggerModifier)) {
         Trigger::Stop();
+        Screenshot::Shutdown();
         Grid::Shutdown();
         Deck::Shutdown();
         Lifecycle::Shutdown();
@@ -163,8 +175,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
     }
 
     InputDismiss::Stop();
-    Grid::Shutdown();
     Trigger::Stop();
+    Screenshot::Shutdown();
+    Grid::Shutdown();
     Deck::Shutdown();
     Lifecycle::Shutdown();
     UnregisterClassW(kClassName, instance);

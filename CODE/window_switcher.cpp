@@ -2,6 +2,8 @@
 
 #include <dwmapi.h>
 
+#include "resource.h"
+
 #include <string>
 #include <vector>
 
@@ -15,6 +17,8 @@ constexpr int kPreviewInset = 8;
 constexpr int kPreviewHeight = 108;
 constexpr int kMonitorMargin = 40;
 constexpr int kSelectionThickness = 3;
+constexpr int kGlamourWidth = 480;
+constexpr int kGlamourHeight = 180;
 
 struct WindowEntry {
     HWND window = nullptr;
@@ -29,6 +33,8 @@ int g_selected = 0;
 int g_firstVisible = 0;
 int g_visibleCount = 0;
 bool g_hiding = false;
+HBITMAP g_glamour = nullptr;
+int g_contentWidth = 0;
 
 bool IsCandidateWindow(HWND window) {
     if (window == nullptr || window == g_window || window == GetShellWindow() || IsWindowVisible(window) == FALSE) {
@@ -90,8 +96,9 @@ void RefreshEntries() {
 }
 
 RECT CardRect(int slot) {
-    const LONG left = static_cast<LONG>(kPadding + slot * (kCardWidth + kGap));
-    const LONG top = kPadding;
+    const int cards_width = (g_visibleCount * kCardWidth) + ((g_visibleCount - 1) * kGap);
+    const LONG left = static_cast<LONG>((g_contentWidth - cards_width) / 2 + slot * (kCardWidth + kGap));
+    const LONG top = kPadding + kGlamourHeight + kGap;
     return RECT{left, top, left + kCardWidth, top + kCardHeight};
 }
 
@@ -280,6 +287,15 @@ void PaintSwitcher(HWND window) {
     SetTextColor(dc, RGB(0, 0, 0));
     HGDIOBJ previous_font = SelectObject(dc, GetStockObject(DEFAULT_GUI_FONT));
 
+    if (g_glamour != nullptr) {
+        HDC image_dc = CreateCompatibleDC(dc);
+        HGDIOBJ previous_image = SelectObject(image_dc, g_glamour);
+        const int left = (g_contentWidth - kGlamourWidth) / 2;
+        StretchBlt(dc, left, kPadding, kGlamourWidth, kGlamourHeight, image_dc, 0, 0, 4096, 1536, SRCCOPY);
+        SelectObject(image_dc, previous_image);
+        DeleteDC(image_dc);
+    }
+
     for (int slot = 0; slot < g_visibleCount; ++slot) {
         const int index = g_firstVisible + slot;
         if (index >= static_cast<int>(g_entries.size())) {
@@ -343,10 +359,10 @@ void PositionSwitcher(HWND anchor) {
     const int entry_count = static_cast<int>(g_entries.size());
     g_visibleCount = entry_count < max_visible ? entry_count : max_visible;
 
-    const int window_width = (2 * kPadding) +
-        (g_visibleCount * kCardWidth) +
-        ((g_visibleCount - 1) * kGap);
-    const int window_height = (2 * kPadding) + kCardHeight;
+    const int cards_width = (g_visibleCount * kCardWidth) + ((g_visibleCount - 1) * kGap);
+    g_contentWidth = cards_width > kGlamourWidth ? cards_width : kGlamourWidth;
+    const int window_width = (2 * kPadding) + g_contentWidth;
+    const int window_height = (2 * kPadding) + kGlamourHeight + kGap + kCardHeight;
     const int x = work_area.left + (work_width - window_width) / 2;
     const int y = work_area.top + (work_height - window_height) / 2;
 
@@ -443,6 +459,15 @@ bool Initialize(HINSTANCE instance) {
         return false;
     }
 
+    g_glamour = LoadBitmapW(instance, MAKEINTRESOURCEW(IDB_SWITCHER_GLAMOUR));
+    if (g_glamour == nullptr) {
+        DestroyWindow(g_window);
+        g_window = nullptr;
+        UnregisterClassW(kSwitcherClassName, instance);
+        g_instance = nullptr;
+        return false;
+    }
+
     return true;
 }
 
@@ -503,6 +528,11 @@ void Shutdown() {
     if (g_instance != nullptr) {
         UnregisterClassW(kSwitcherClassName, g_instance);
         g_instance = nullptr;
+    }
+
+    if (g_glamour != nullptr) {
+        DeleteObject(g_glamour);
+        g_glamour = nullptr;
     }
 }
 

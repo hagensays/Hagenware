@@ -1,0 +1,3 @@
+#include "resource.h"
+
+IDB_SWITCHER_GLAMOUR BITMAP "switcher_glamour.bmp"

@@ -64,6 +64,19 @@ bool IsDismissMouseInput(WPARAM message) {
         message == WM_MOUSEHWHEEL;
 }
 
+bool IsPointInsideActiveSurface(const POINT& point) {
+    if (g_surfaceWindow == nullptr || IsWindowVisible(g_surfaceWindow) == FALSE) {
+        return false;
+    }
+
+    RECT surface_rect{};
+    if (GetWindowRect(g_surfaceWindow, &surface_rect) == FALSE) {
+        return false;
+    }
+
+    return PtInRect(&surface_rect, point) != FALSE;
+}
+
 SurfaceKind SurfaceForWindow(HWND window) {
     if (window == nullptr) {
         return SurfaceKind::None;
@@ -131,7 +144,10 @@ LRESULT CALLBACK MouseHookProc(int code, WPARAM wparam, LPARAM lparam) {
         g_surfaceWindow != nullptr &&
         IsWindowVisible(g_surfaceWindow) != FALSE &&
         IsDismissMouseInput(wparam)) {
-        DismissSurfaceForPassThrough();
+        const auto* mouse = reinterpret_cast<const MSLLHOOKSTRUCT*>(lparam);
+        if (!IsPointInsideActiveSurface(mouse->pt)) {
+            DismissSurfaceForPassThrough();
+        }
     }
 
     return CallNextHookEx(nullptr, code, wparam, lparam);

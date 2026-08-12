@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate version branch
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_HEAD_REF -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "Release branch must be named vX.Y.Z."
+          }
+
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $install = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $install) { throw "MSVC not found." }
+          $vcvars = Join-Path $install "VC\Auxiliary\Build\vcvars64.bat"
+          $command = "call `"$vcvars`" >nul && cl /nologo /std:c++20 /W4 /WX /O2 /MT /DUNICODE /D_UNICODE /EHsc CODE\main.cpp user32.lib gdi32.lib /link /SUBSYSTEM:WINDOWS /OUT:Hagenware.exe"
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path "Hagenware.exe")) { throw "Hagenware.exe was not produced." }
+
+      - name: Check runtime dependencies
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $install = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $vcvars = Join-Path $install "VC\Auxiliary\Build\vcvars64.bat"
+          $command = "call `"$vcvars`" >nul && dumpbin /dependents Hagenware.exe"
+          $output = cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $dlls = $output |
+            Select-String -Pattern '^\s+([A-Za-z0-9._-]+\.dll)\s*$' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value } |
+            Sort-Object -Unique
+
+          $forbidden = $dlls | Where-Object {
+            $_ -match '^(VCRUNTIME|MSVCP|api-ms-win-crt)' -or $_ -ieq 'ucrtbase.dll'
+          }
+          if ($forbidden) { throw "External C/C++ runtime dependency detected: $($forbidden -join ', ')" }
+
+          $missing = $dlls | Where-Object { -not (Test-Path (Join-Path "$env:SystemRoot\System32" $_)) }
+          if ($missing) { throw "Non-system DLL dependency detected: $($missing -join ', ')" }
+
+          Write-Host "Dependencies: $($dlls -join ', ')"

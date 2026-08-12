@@ -9,8 +9,9 @@ namespace {
 constexpr wchar_t kIndicatorClassName[] = L"HagenwareScreenshotIndicator";
 constexpr wchar_t kDeckClassName[] = L"HagenwareDeck";
 constexpr UINT kCaptureMessage = WM_APP + 1;
-constexpr int kIndicatorWidth = 10;
-constexpr int kIndicatorHeight = 9;
+constexpr int kIndicatorWidth = 22;
+constexpr int kIndicatorHeight = 18;
+constexpr int kIndicatorMargin = 14;
 constexpr DWORD kModulePathCapacity = 32768;
 
 HINSTANCE g_instance = nullptr;
@@ -37,13 +38,16 @@ void PositionIndicator(HWND deck_window) {
         return;
     }
 
-    RECT deck_rect{};
-    if (GetWindowRect(deck_window, &deck_rect) == FALSE) {
+    MONITORINFO monitor_info{};
+    monitor_info.cbSize = sizeof(monitor_info);
+    const HMONITOR monitor = MonitorFromWindow(deck_window, MONITOR_DEFAULTTONEAREST);
+    if (GetMonitorInfoW(monitor, &monitor_info) == FALSE) {
         return;
     }
 
-    const int x = static_cast<int>(deck_rect.right) - kIndicatorWidth - 2;
-    const int y = static_cast<int>(deck_rect.top) + 2;
+    const RECT& work_area = monitor_info.rcWork;
+    const int x = static_cast<int>(work_area.right) - kIndicatorWidth - kIndicatorMargin;
+    const int y = static_cast<int>(work_area.top) + kIndicatorMargin;
 
     SetWindowPos(
         g_indicatorWindow,
@@ -294,9 +298,11 @@ void PaintIndicator(HWND window) {
     HGDIOBJ previous_brush = SelectObject(dc, GetStockObject(WHITE_BRUSH));
     HGDIOBJ previous_pen = SelectObject(dc, GetStockObject(BLACK_PEN));
 
-    Rectangle(dc, 1, 2, 9, 8);
-    Rectangle(dc, 3, 1, 7, 3);
-    Rectangle(dc, 4, 4, 6, 6);
+    Rectangle(dc, 2, 2, 20, 13);
+    MoveToEx(dc, 11, 13, nullptr);
+    LineTo(dc, 11, 15);
+    MoveToEx(dc, 7, 15, nullptr);
+    LineTo(dc, 15, 15);
 
     if (previous_pen != nullptr) {
         SelectObject(dc, previous_pen);

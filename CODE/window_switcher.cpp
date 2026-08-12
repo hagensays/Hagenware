@@ -2,9 +2,8 @@
 
 #include <dwmapi.h>
 #include <objidl.h>
+#include <shlwapi.h>
 #include <wincodec.h>
-
-#include "resource.h"
 
 #include <string>
 #include <vector>
@@ -41,38 +40,9 @@ int g_glamourSourceHeight = 0;
 int g_contentWidth = 0;
 bool g_comInitialized = false;
 
-HBITMAP LoadGlamourBitmap() {
-    HRSRC resource = FindResourceW(g_instance, MAKEINTRESOURCEW(IDB_SWITCHER_GLAMOUR), RT_RCDATA);
-    if (resource == nullptr) {
-        return nullptr;
-    }
-
-    HGLOBAL loaded = LoadResource(g_instance, resource);
-    const DWORD resource_size = SizeofResource(g_instance, resource);
-    if (loaded == nullptr || resource_size == 0) {
-        return nullptr;
-    }
-
-    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, resource_size);
-    if (memory == nullptr) {
-        return nullptr;
-    }
-
-    void* destination = GlobalLock(memory);
-    const void* source = LockResource(loaded);
-    if (destination == nullptr || source == nullptr) {
-        if (destination != nullptr) {
-            GlobalUnlock(memory);
-        }
-        GlobalFree(memory);
-        return nullptr;
-    }
-    CopyMemory(destination, source, resource_size);
-    GlobalUnlock(memory);
-
+HBITMAP LoadGlamourBitmap(const std::wstring& path) {
     IStream* stream = nullptr;
-    if (FAILED(CreateStreamOnHGlobal(memory, TRUE, &stream))) {
-        GlobalFree(memory);
+    if (FAILED(SHCreateStreamOnFileEx(path.c_str(), STGM_READ | STGM_SHARE_DENY_WRITE, 0, FALSE, nullptr, &stream))) {
         return nullptr;
     }
 
@@ -589,7 +559,21 @@ bool Initialize(HINSTANCE instance) {
     }
     g_comInitialized = true;
 
-    g_glamour = LoadGlamourBitmap();
+    wchar_t module_path[MAX_PATH]{};
+    if (GetModuleFileNameW(nullptr, module_path, ARRAYSIZE(module_path)) == 0) {
+        CoUninitialize();
+        g_comInitialized = false;
+        DestroyWindow(g_window);
+        g_window = nullptr;
+        UnregisterClassW(kSwitcherClassName, instance);
+        g_instance = nullptr;
+        return false;
+    }
+    std::wstring data_directory(module_path);
+    const size_t separator = data_directory.find_last_of(L"\\/");
+    data_directory.resize(separator == std::wstring::npos ? 0 : separator + 1);
+    data_directory += L"Hagenware Data\\";
+    g_glamour = LoadGlamourBitmap(data_directory + L"human.png");
     if (g_glamour == nullptr) {
         CoUninitialize();
         g_comInitialized = false;

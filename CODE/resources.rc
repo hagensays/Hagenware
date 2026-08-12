@@ -1,3 +1,0 @@
-#include "resource.h"
-
-IDB_SWITCHER_GLAMOUR RCDATA "switcher_glamour.png"

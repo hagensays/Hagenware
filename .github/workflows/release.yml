@@ -41,7 +41,7 @@ jobs:
           $install = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if (-not $install) { throw "MSVC not found." }
           $vcvars = Join-Path $install "VC\Auxiliary\Build\vcvars64.bat"
-          $command = "call `"$vcvars`" >nul && rc /nologo /foHagenware.res CODE\resources.rc && cl /nologo /std:c++20 /W4 /WX /O2 /MT /DUNICODE /D_UNICODE /EHsc CODE\*.cpp Hagenware.res user32.lib gdi32.lib dwmapi.lib windowscodecs.lib ole32.lib /link /SUBSYSTEM:WINDOWS /OUT:Hagenware.exe"
+          $command = "call `"$vcvars`" >nul && cl /nologo /std:c++20 /W4 /WX /O2 /MT /DUNICODE /D_UNICODE /EHsc CODE\*.cpp user32.lib gdi32.lib dwmapi.lib windowscodecs.lib ole32.lib shlwapi.lib /link /SUBSYSTEM:WINDOWS /OUT:Hagenware.exe"
           cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Test-Path "Hagenware.exe")) { throw "Hagenware.exe was not produced." }
@@ -49,6 +49,10 @@ jobs:
       - name: Package source
         shell: pwsh
         run: Compress-Archive -Path CODE -DestinationPath 'Hagenware Code.zip' -Force
+
+      - name: Package artwork
+        shell: pwsh
+        run: Compress-Archive -Path 'Hagenware Data' -DestinationPath 'Hagenware Data.zip' -Force
 
       - name: Publish GitHub Release
         shell: pwsh
@@ -60,4 +64,4 @@ jobs:
           $notes = $env:RELEASE_NOTES
           if ([string]::IsNullOrWhiteSpace($notes)) { $notes = $env:PR_TITLE }
           Set-Content -Path release-notes.md -Value $notes -Encoding utf8
-          gh release create $env:VERSION 'Hagenware.exe' 'Hagenware Code.zip' --title $env:VERSION --notes-file release-notes.md --target main
+          gh release create $env:VERSION 'Hagenware.exe' 'Hagenware Code.zip' 'Hagenware Data.zip' --title $env:VERSION --notes-file release-notes.md --target main

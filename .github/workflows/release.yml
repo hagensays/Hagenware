@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.event.pull_request.merged == true
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Read version
+        shell: pwsh
+        run: |
+          $version = '${{ github.event.pull_request.head.ref }}'
+          if ($version -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "Merged branch must be named vX.Y.Z."
+          }
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $install = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $install) { throw "MSVC not found." }
+          $vcvars = Join-Path $install "VC\Auxiliary\Build\vcvars64.bat"
+          $command = "call `"$vcvars`" >nul && cl /nologo /std:c++20 /W4 /WX /O2 /MT /DUNICODE /D_UNICODE /EHsc CODE\main.cpp user32.lib gdi32.lib /link /SUBSYSTEM:WINDOWS /OUT:Hagenware.exe"
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path "Hagenware.exe")) { throw "Hagenware.exe was not produced." }
+
+      - name: Package source
+        shell: pwsh
+        run: Compress-Archive -Path CODE -DestinationPath 'Hagenware Code.zip' -Force
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_NOTES: ${{ github.event.pull_request.body }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          $notes = $env:RELEASE_NOTES
+          if ([string]::IsNullOrWhiteSpace($notes)) { $notes = $env:PR_TITLE }
+          Set-Content -Path release-notes.md -Value $notes -Encoding utf8
+          gh release create $env:VERSION 'Hagenware.exe' 'Hagenware Code.zip' --title $env:VERSION --notes-file release-notes.md --target main

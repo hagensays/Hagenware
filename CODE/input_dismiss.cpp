@@ -24,6 +24,10 @@ bool IsControlKey(DWORD virtual_key) {
     return virtual_key == VK_CONTROL || virtual_key == VK_LCONTROL || virtual_key == VK_RCONTROL;
 }
 
+bool IsScreenshotKey(DWORD virtual_key) {
+    return virtual_key == VK_SNAPSHOT || virtual_key == VK_PRINT;
+}
+
 bool IsProgrammedKey(SurfaceKind surface, DWORD virtual_key) {
     if (surface == SurfaceKind::Deck) {
         return virtual_key == VK_LEFT ||
@@ -32,7 +36,7 @@ bool IsProgrammedKey(SurfaceKind surface, DWORD virtual_key) {
             virtual_key == VK_DOWN ||
             virtual_key == VK_SPACE ||
             virtual_key == VK_ESCAPE ||
-            virtual_key == VK_SNAPSHOT ||
+            IsScreenshotKey(virtual_key) ||
             (virtual_key >= L'1' && virtual_key <= L'9');
     }
 
@@ -65,6 +69,10 @@ bool IsDismissMouseInput(WPARAM message) {
 bool IsPointInsideActiveSurface(const POINT& point) {
     if (g_surfaceWindow == nullptr || IsWindowVisible(g_surfaceWindow) == FALSE) {
         return false;
+    }
+
+    if (g_surfaceKind == SurfaceKind::Deck && Screenshot::IsIndicatorPoint(point)) {
+        return true;
     }
 
     RECT surface_rect{};
@@ -165,7 +173,7 @@ KeyboardAction HandleKeyboard(DWORD virtual_key, bool key_down, bool key_up) {
         return KeyboardAction::PassThrough;
     }
 
-    if (g_surfaceKind == SurfaceKind::Deck && virtual_key == VK_SNAPSHOT) {
+    if (g_surfaceKind == SurfaceKind::Deck && IsScreenshotKey(virtual_key)) {
         if (key_down) {
             Screenshot::RequestCapture();
         }

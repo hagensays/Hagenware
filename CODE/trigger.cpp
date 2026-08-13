@@ -301,6 +301,14 @@ LRESULT CALLBACK KeyboardHookProc(int code, WPARAM wparam, LPARAM lparam) {
     const InputDismiss::KeyboardAction surface_action =
         InputDismiss::HandleKeyboard(key->vkCode, key_down, key_up);
 
+    if (surface_action == InputDismiss::KeyboardAction::Consume) {
+        if (key_down) {
+            CancelCandidateAndPending();
+        }
+        SetKeyDown(key->vkCode, key_down);
+        return 1;
+    }
+
     if (surface_action == InputDismiss::KeyboardAction::SuppressTrigger && key_down) {
         SuppressCurrentModifier(*key);
         SetKeyDown(key->vkCode, true);
@@ -312,9 +320,7 @@ LRESULT CALLBACK KeyboardHookProc(int code, WPARAM wparam, LPARAM lparam) {
             ClearSuppressed();
         }
         SetKeyDown(key->vkCode, key_down);
-        return surface_action == InputDismiss::KeyboardAction::Consume
-            ? 1
-            : CallNextHookEx(nullptr, code, wparam, lparam);
+        return CallNextHookEx(nullptr, code, wparam, lparam);
     }
 
     const ModifierTrigger modifier = ModifierForKey(key->vkCode);
@@ -340,10 +346,6 @@ LRESULT CALLBACK KeyboardHookProc(int code, WPARAM wparam, LPARAM lparam) {
             }
         }
         SetKeyDown(key->vkCode, false);
-    }
-
-    if (surface_action == InputDismiss::KeyboardAction::Consume) {
-        return 1;
     }
 
     return CallNextHookEx(nullptr, code, wparam, lparam);

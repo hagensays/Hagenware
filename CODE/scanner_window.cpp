@@ -7,11 +7,24 @@ constexpr wchar_t kClassName[] = L"HagenwareScannerWindow";
 constexpr int kWindowWidth = 640;
 constexpr int kWindowHeight = 420;
 constexpr int kContentPadding = 18;
+constexpr int kTitleTop = 14;
+constexpr int kTitleHeight = 30;
+constexpr int kControlsTop = 58;
+constexpr int kControlHeight = 28;
+constexpr int kDriveWidth = 90;
+constexpr int kControlGap = 10;
+constexpr int kDriveComboId = 1001;
+constexpr int kPathEditId = 1002;
 
 HINSTANCE g_instance = nullptr;
 HWND g_window = nullptr;
-HFONT g_font = nullptr;
+HWND g_driveCombo = nullptr;
+HWND g_pathEdit = nullptr;
+HWND g_anchorWindow = nullptr;
+HFONT g_titleFont = nullptr;
+HFONT g_bodyFont = nullptr;
 bool g_activityActive = false;
+bool g_positionInitialized = false;
 
 void EndActivityIfActive() {
     if (g_activityActive) {
@@ -20,11 +33,70 @@ void EndActivityIfActive() {
     }
 }
 
-void HideWindow() {
+void HideWindow(bool restore_host) {
     if (g_window != nullptr && IsWindowVisible(g_window) != FALSE) {
         ShowWindow(g_window, SW_HIDE);
     }
     EndActivityIfActive();
+
+    if (restore_host &&
+        g_anchorWindow != nullptr &&
+        IsWindow(g_anchorWindow) != FALSE &&
+        IsWindowVisible(g_anchorWindow) != FALSE) {
+        SetForegroundWindow(g_anchorWindow);
+        SetActiveWindow(g_anchorWindow);
+        SetFocus(g_anchorWindow);
+    }
+}
+
+void RefreshDriveList() {
+    if (g_driveCombo == nullptr) {
+        return;
+    }
+
+    wchar_t previous_drive[4]{};
+    const LRESULT previous_index = SendMessageW(g_driveCombo, CB_GETCURSEL, 0, 0);
+    if (previous_index != CB_ERR) {
+        SendMessageW(
+            g_driveCombo,
+            CB_GETLBTEXT,
+            static_cast<WPARAM>(previous_index),
+            reinterpret_cast<LPARAM>(previous_drive));
+    }
+
+    SendMessageW(g_driveCombo, CB_RESETCONTENT, 0, 0);
+
+    int selected_index = -1;
+    const DWORD drives = GetLogicalDrives();
+    for (int index = 0; index < 26; ++index) {
+        if ((drives & (1u << index)) == 0) {
+            continue;
+        }
+
+        wchar_t drive_label[3]{
+            static_cast<wchar_t>(L'A' + index),
+            L':',
+            L'\0'};
+        const LRESULT added_index = SendMessageW(
+            g_driveCombo,
+            CB_ADDSTRING,
+            0,
+            reinterpret_cast<LPARAM>(drive_label));
+        if (added_index == CB_ERR || added_index == CB_ERRSPACE) {
+            continue;
+        }
+
+        if (previous_drive[0] != L'\0' && lstrcmpW(previous_drive, drive_label) == 0) {
+            selected_index = static_cast<int>(added_index);
+        }
+    }
+
+    if (selected_index < 0 && SendMessageW(g_driveCombo, CB_GETCOUNT, 0, 0) > 0) {
+        selected_index = 0;
+    }
+    if (selected_index >= 0) {
+        SendMessageW(g_driveCombo, CB_SETCURSEL, static_cast<WPARAM>(selected_index), 0);
+    }
 }
 
 void PaintWindow(HWND window) {
@@ -38,18 +110,18 @@ void PaintWindow(HWND window) {
 
     SetBkMode(dc, TRANSPARENT);
     SetTextColor(dc, RGB(0, 0, 0));
-    HGDIOBJ previous_font = SelectObject(dc, g_font);
+    HGDIOBJ previous_font = SelectObject(dc, g_titleFont);
 
-    RECT text_rect{
+    RECT title_rect{
         kContentPadding,
-        kContentPadding,
+        kTitleTop,
         client.right - kContentPadding,
-        client.bottom - kContentPadding};
+        kTitleTop + kTitleHeight};
     DrawTextW(
         dc,
         L"Scanner",
         -1,
-        &text_rect,
+        &title_rect,
         DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
 
     if (previous_font != nullptr) {
@@ -66,9 +138,13 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
         return 0;
     case WM_ERASEBKGND:
         return 1;
+    case WM_NCHITTEST: {
+        const LRESULT hit = DefWindowProcW(window, message, wparam, lparam);
+        return hit == HTCLIENT ? HTCAPTION : hit;
+    }
     case WM_SYSKEYDOWN:
         if (wparam == L'S' && (GetKeyState(VK_MENU) & 0x8000) != 0) {
-            HideWindow();
+            HideWindow(true);
             return 0;
         }
         break;
@@ -79,15 +155,17 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
         break;
     case WM_KEYDOWN:
         if (wparam == VK_ESCAPE) {
-            HideWindow();
+            HideWindow(true);
             return 0;
         }
         break;
     case WM_CLOSE:
-        HideWindow();
+        HideWindow(true);
         return 0;
     case WM_DESTROY:
         EndActivityIfActive();
+        g_driveCombo = nullptr;
+        g_pathEdit = nullptr;
         g_window = nullptr;
         return 0;
     default:
@@ -116,12 +194,56 @@ void PositionWindow(HWND anchor_window) {
 
     SetWindowPos(
         g_window,
-        HWND_TOP,
+        nullptr,
         x,
         y,
         kWindowWidth,
         kWindowHeight,
-        SWP_SHOWWINDOW);
+        SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+bool CreateControls() {
+    const int path_left = kContentPadding + kDriveWidth + kControlGap;
+    const int path_width = kWindowWidth - path_left - kContentPadding;
+
+    g_driveCombo = CreateWindowExW(
+        0,
+        L"COMBOBOX",
+        L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
+        kContentPadding,
+        kControlsTop,
+        kDriveWidth,
+        220,
+        g_window,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kDriveComboId)),
+        g_instance,
+        nullptr);
+    if (g_driveCombo == nullptr) {
+        return false;
+    }
+
+    g_pathEdit = CreateWindowExW(
+        0,
+        L"EDIT",
+        L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL,
+        path_left,
+        kControlsTop,
+        path_width,
+        kControlHeight,
+        g_window,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPathEditId)),
+        g_instance,
+        nullptr);
+    if (g_pathEdit == nullptr) {
+        return false;
+    }
+
+    SendMessageW(g_driveCombo, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
+    SendMessageW(g_pathEdit, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
+    RefreshDriveList();
+    return true;
 }
 } // namespace
 
@@ -149,7 +271,7 @@ bool Initialize(HINSTANCE instance) {
         return false;
     }
 
-    g_font = CreateFontW(
+    g_bodyFont = CreateFontW(
         -16,
         0,
         0,
@@ -164,8 +286,30 @@ bool Initialize(HINSTANCE instance) {
         CLEARTYPE_QUALITY,
         DEFAULT_PITCH | FF_DONTCARE,
         L"Segoe UI");
+    if (g_bodyFont == nullptr) {
+        UnregisterClassW(kClassName, g_instance);
+        g_instance = nullptr;
+        return false;
+    }
 
-    if (g_font == nullptr) {
+    g_titleFont = CreateFontW(
+        -20,
+        0,
+        0,
+        0,
+        FW_SEMIBOLD,
+        FALSE,
+        FALSE,
+        FALSE,
+        DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY,
+        DEFAULT_PITCH | FF_DONTCARE,
+        L"Segoe UI");
+    if (g_titleFont == nullptr) {
+        DeleteObject(g_bodyFont);
+        g_bodyFont = nullptr;
         UnregisterClassW(kClassName, g_instance);
         g_instance = nullptr;
         return false;
@@ -186,8 +330,22 @@ bool Initialize(HINSTANCE instance) {
         nullptr);
 
     if (g_window == nullptr) {
-        DeleteObject(g_font);
-        g_font = nullptr;
+        DeleteObject(g_titleFont);
+        DeleteObject(g_bodyFont);
+        g_titleFont = nullptr;
+        g_bodyFont = nullptr;
+        UnregisterClassW(kClassName, g_instance);
+        g_instance = nullptr;
+        return false;
+    }
+
+    if (!CreateControls()) {
+        HWND window = g_window;
+        DestroyWindow(window);
+        DeleteObject(g_titleFont);
+        DeleteObject(g_bodyFont);
+        g_titleFont = nullptr;
+        g_bodyFont = nullptr;
         UnregisterClassW(kClassName, g_instance);
         g_instance = nullptr;
         return false;
@@ -201,8 +359,12 @@ bool Toggle(HWND anchor_window) {
         return false;
     }
 
+    if (anchor_window != nullptr && IsWindow(anchor_window) != FALSE) {
+        g_anchorWindow = anchor_window;
+    }
+
     if (IsWindowVisible(g_window) != FALSE) {
-        HideWindow();
+        HideWindow(true);
         return true;
     }
 
@@ -211,7 +373,13 @@ bool Toggle(HWND anchor_window) {
         g_activityActive = true;
     }
 
-    PositionWindow(anchor_window);
+    RefreshDriveList();
+    if (!g_positionInitialized) {
+        PositionWindow(g_anchorWindow);
+        g_positionInitialized = true;
+    }
+
+    ShowWindow(g_window, SW_SHOWNORMAL);
     InvalidateRect(g_window, nullptr, FALSE);
     SetForegroundWindow(g_window);
     SetActiveWindow(g_window);
@@ -220,22 +388,29 @@ bool Toggle(HWND anchor_window) {
 }
 
 void Shutdown() {
-    HideWindow();
+    HideWindow(false);
 
     if (g_window != nullptr) {
         HWND window = g_window;
         DestroyWindow(window);
     }
 
-    if (g_font != nullptr) {
-        DeleteObject(g_font);
-        g_font = nullptr;
+    if (g_titleFont != nullptr) {
+        DeleteObject(g_titleFont);
+        g_titleFont = nullptr;
+    }
+    if (g_bodyFont != nullptr) {
+        DeleteObject(g_bodyFont);
+        g_bodyFont = nullptr;
     }
 
     if (g_instance != nullptr) {
         UnregisterClassW(kClassName, g_instance);
         g_instance = nullptr;
     }
+
+    g_anchorWindow = nullptr;
+    g_positionInitialized = false;
 }
 
 } // namespace ScannerWindow

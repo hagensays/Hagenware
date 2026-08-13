@@ -196,7 +196,11 @@ KeyboardAction HandleKeyboard(DWORD virtual_key, bool key_down, bool) {
     }
 
     if (IsProgrammedKey(g_surfaceKind, virtual_key)) {
-        return KeyboardAction::PassThrough;
+        if (key_down && PostMessageW(g_surfaceWindow, WM_KEYDOWN, virtual_key, 0) == FALSE) {
+            DismissSurfaceForPassThrough();
+            return KeyboardAction::PassThrough;
+        }
+        return KeyboardAction::Consume;
     }
 
     if (!key_down) {

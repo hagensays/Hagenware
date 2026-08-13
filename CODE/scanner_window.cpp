@@ -59,7 +59,7 @@ void PaintWindow(HWND window) {
     EndPaint(window, &paint);
 }
 
-LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM) {
     switch (message) {
     case WM_PAINT:
         PaintWindow(window);
@@ -94,7 +94,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
         break;
     }
 
-    return DefWindowProcW(window, message, wparam, lparam);
+    return DefWindowProcW(window, message, wparam, 0);
 }
 
 void PositionWindow(HWND anchor_window) {

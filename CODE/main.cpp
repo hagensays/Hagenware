@@ -11,6 +11,7 @@
 #include "status_indicator.h"
 #include "trigger.h"
 #include "version.h"
+#include "wiki.h"
 
 namespace {
 constexpr wchar_t kClassName[] = L"HagenwareWindow";
@@ -54,6 +55,18 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
             Grid::Show();
         }
         return 0;
+    case WM_KEYDOWN:
+        if (wparam == VK_F1 && GetForegroundWindow() == window) {
+            if (!Wiki::Open(window)) {
+                MessageBoxW(
+                    window,
+                    L"Hagenware Wiki.txt could not be created or opened next to Hagenware.exe.",
+                    L"Hagenware Wiki",
+                    MB_OK | MB_ICONERROR);
+            }
+            return 0;
+        }
+        break;
     case WM_PAINT: {
         PAINTSTRUCT paint{};
         HDC dc = BeginPaint(window, &paint);
@@ -72,6 +85,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
     default:
         return DefWindowProcW(window, message, wparam, lparam);
     }
+
+    return DefWindowProcW(window, message, wparam, lparam);
 }
 
 void DestroyHostWindow(HWND window, HINSTANCE instance) {

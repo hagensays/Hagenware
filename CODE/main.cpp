@@ -8,6 +8,7 @@
 #include "instance_handoff.h"
 #include "lifecycle.h"
 #include "screenshot.h"
+#include "status_indicator.h"
 #include "trigger.h"
 #include "version.h"
 
@@ -173,6 +174,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
         return 1;
     }
 
+    if (!StatusIndicator::Initialize(instance)) {
+        Trigger::Stop();
+        InputDismiss::Stop();
+        Screenshot::Shutdown();
+        Grid::Shutdown();
+        Deck::Shutdown();
+        Lifecycle::Shutdown();
+        DestroyHostWindow(window, instance);
+        InstanceHandoff::EndStartup();
+        return 1;
+    }
+
     InstanceHandoff::EndStartup();
     ShowWindow(window, show_command);
 
@@ -194,6 +207,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
         break;
     }
 
+    StatusIndicator::Shutdown();
     Trigger::Stop();
     InputDismiss::Stop();
     Screenshot::Shutdown();

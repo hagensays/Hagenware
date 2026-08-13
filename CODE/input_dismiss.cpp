@@ -125,10 +125,13 @@ LRESULT CALLBACK MouseHookProc(int code, WPARAM wparam, LPARAM lparam) {
         IsWindowVisible(g_surfaceWindow) != FALSE &&
         IsDismissMouseInput(wparam)) {
         const auto* mouse = reinterpret_cast<const MSLLHOOKSTRUCT*>(lparam);
+
+        if (wparam == WM_MOUSEWHEEL && HandleDeckWheel(*mouse)) {
+            return 1;
+        }
+
         if (!IsPointInsideActiveSurface(mouse->pt)) {
             DismissSurfaceForPassThrough();
-        } else if (wparam == WM_MOUSEWHEEL && HandleDeckWheel(*mouse)) {
-            return 1;
         }
     }
 

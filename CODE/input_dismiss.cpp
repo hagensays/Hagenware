@@ -24,10 +24,6 @@ bool IsControlKey(DWORD virtual_key) {
     return virtual_key == VK_CONTROL || virtual_key == VK_LCONTROL || virtual_key == VK_RCONTROL;
 }
 
-bool IsScreenshotKey(DWORD virtual_key) {
-    return virtual_key == VK_SNAPSHOT || virtual_key == VK_PRINT;
-}
-
 bool IsProgrammedKey(SurfaceKind surface, DWORD virtual_key) {
     if (surface == SurfaceKind::Deck) {
         return virtual_key == VK_LEFT ||
@@ -36,7 +32,6 @@ bool IsProgrammedKey(SurfaceKind surface, DWORD virtual_key) {
             virtual_key == VK_DOWN ||
             virtual_key == VK_SPACE ||
             virtual_key == VK_ESCAPE ||
-            IsScreenshotKey(virtual_key) ||
             (virtual_key >= L'1' && virtual_key <= L'9');
     }
 
@@ -163,7 +158,7 @@ void Deactivate(HWND window) {
     }
 }
 
-KeyboardAction HandleKeyboard(DWORD virtual_key, bool key_down, bool key_up) {
+KeyboardAction HandleKeyboard(DWORD virtual_key, bool key_down, bool) {
     if (g_surfaceWindow == nullptr || g_surfaceKind == SurfaceKind::None) {
         return KeyboardAction::PassThrough;
     }
@@ -171,15 +166,6 @@ KeyboardAction HandleKeyboard(DWORD virtual_key, bool key_down, bool key_up) {
     if (IsWindowVisible(g_surfaceWindow) == FALSE) {
         StopMouseHook();
         return KeyboardAction::PassThrough;
-    }
-
-    if (g_surfaceKind == SurfaceKind::Deck && IsScreenshotKey(virtual_key)) {
-        if (key_down) {
-            Screenshot::RequestCapture();
-        }
-        if (key_down || key_up) {
-            return KeyboardAction::Consume;
-        }
     }
 
     if (IsProgrammedKey(g_surfaceKind, virtual_key)) {

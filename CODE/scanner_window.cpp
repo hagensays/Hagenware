@@ -1,5 +1,7 @@
 #include "scanner_window.h"
 
+#include <string>
+
 #include "lifecycle.h"
 
 namespace {
@@ -9,20 +11,43 @@ constexpr int kWindowHeight = 420;
 constexpr int kContentPadding = 18;
 constexpr int kTitleTop = 14;
 constexpr int kTitleHeight = 30;
-constexpr int kControlsTop = 58;
+constexpr int kControlsLeft = 40;
+constexpr int kRowOneTop = 58;
+constexpr int kRowTwoTop = 100;
+constexpr int kRowThreeTop = 142;
 constexpr int kControlHeight = 28;
-constexpr int kDriveWidth = 90;
-constexpr int kControlGap = 10;
+constexpr int kDriveWidth = 76;
+constexpr int kRefreshSize = 28;
+constexpr int kExtensionWidth = 86;
+constexpr int kScanButtonWidth = 90;
+constexpr int kControlGap = 8;
+constexpr int kProgressHeight = 18;
 constexpr int kDriveComboId = 1001;
 constexpr int kPathEditId = 1002;
+constexpr int kRefreshButtonId = 1003;
+constexpr int kExportNameEditId = 1004;
+constexpr int kExtensionComboId = 1005;
+constexpr int kScanButtonId = 1006;
+
+struct NormalizedPath {
+    wchar_t drive = L'\0';
+    std::wstring relative;
+};
 
 HINSTANCE g_instance = nullptr;
 HWND g_window = nullptr;
 HWND g_driveCombo = nullptr;
+HWND g_refreshButton = nullptr;
 HWND g_pathEdit = nullptr;
+HWND g_exportNameEdit = nullptr;
+HWND g_extensionCombo = nullptr;
+HWND g_scanButton = nullptr;
 HWND g_anchorWindow = nullptr;
 HFONT g_titleFont = nullptr;
 HFONT g_bodyFont = nullptr;
+WNDPROC g_pathEditOriginalProc = nullptr;
+std::wstring g_normalizedRelativePath;
+wchar_t g_normalizedDrive = L'\0';
 bool g_activityActive = false;
 bool g_positionInitialized = false;
 
@@ -49,21 +74,126 @@ void HideWindow(bool restore_host) {
     }
 }
 
+bool IsAsciiLetter(wchar_t value) {
+    return (value >= L'A' && value <= L'Z') ||
+        (value >= L'a' && value <= L'z');
+}
+
+wchar_t UpperAscii(wchar_t value) {
+    if (value >= L'a' && value <= L'z') {
+        return static_cast<wchar_t>(value - L'a' + L'A');
+    }
+    return value;
+}
+
+std::wstring ReadControlText(HWND control) {
+    if (control == nullptr) {
+        return {};
+    }
+
+    const int length = GetWindowTextLengthW(control);
+    if (length <= 0) {
+        return {};
+    }
+
+    std::wstring text(static_cast<size_t>(length) + 1, L'\0');
+    const int copied = GetWindowTextW(control, text.data(), length + 1);
+    if (copied <= 0) {
+        return {};
+    }
+
+    text.resize(static_cast<size_t>(copied));
+    return text;
+}
+
+NormalizedPath NormalizePathText(const std::wstring& raw_text) {
+    NormalizedPath normalized{};
+    size_t start = 0;
+
+    if (raw_text.size() >= 2 && IsAsciiLetter(raw_text[0]) && raw_text[1] == L':') {
+        normalized.drive = UpperAscii(raw_text[0]);
+        start = 2;
+    }
+
+    normalized.relative.reserve(raw_text.size() - start);
+    bool previous_separator = false;
+
+    for (size_t index = start; index < raw_text.size(); ++index) {
+        const wchar_t value = raw_text[index];
+        const bool separator = value == L'\\' || value == L'/';
+
+        if (separator) {
+            if (normalized.relative.empty() || previous_separator) {
+                previous_separator = true;
+                continue;
+            }
+
+            normalized.relative.push_back(L'\\');
+            previous_separator = true;
+            continue;
+        }
+
+        normalized.relative.push_back(value);
+        previous_separator = false;
+    }
+
+    return normalized;
+}
+
+wchar_t SelectedDriveLetter() {
+    if (g_driveCombo == nullptr) {
+        return L'\0';
+    }
+
+    const LRESULT selected = SendMessageW(g_driveCombo, CB_GETCURSEL, 0, 0);
+    if (selected == CB_ERR) {
+        return L'\0';
+    }
+
+    wchar_t label[4]{};
+    if (SendMessageW(
+            g_driveCombo,
+            CB_GETLBTEXT,
+            static_cast<WPARAM>(selected),
+            reinterpret_cast<LPARAM>(label)) == CB_ERR) {
+        return L'\0';
+    }
+
+    return UpperAscii(label[0]);
+}
+
+void RefreshNormalizedPathState() {
+    const NormalizedPath normalized = NormalizePathText(ReadControlText(g_pathEdit));
+    g_normalizedRelativePath = normalized.relative;
+    g_normalizedDrive = normalized.drive != L'\0' ? normalized.drive : SelectedDriveLetter();
+}
+
+bool SelectDrive(wchar_t drive) {
+    if (g_driveCombo == nullptr || !IsAsciiLetter(drive)) {
+        return false;
+    }
+
+    wchar_t label[3]{UpperAscii(drive), L':', L'\0'};
+    const LRESULT index = SendMessageW(
+        g_driveCombo,
+        CB_FINDSTRINGEXACT,
+        static_cast<WPARAM>(-1),
+        reinterpret_cast<LPARAM>(label));
+    if (index == CB_ERR) {
+        return false;
+    }
+
+    SendMessageW(g_driveCombo, CB_SETCURSEL, static_cast<WPARAM>(index), 0);
+    RefreshNormalizedPathState();
+    return true;
+}
+
 void RefreshDriveList() {
     if (g_driveCombo == nullptr) {
         return;
     }
 
-    wchar_t previous_drive[4]{};
-    const LRESULT previous_index = SendMessageW(g_driveCombo, CB_GETCURSEL, 0, 0);
-    if (previous_index != CB_ERR) {
-        SendMessageW(
-            g_driveCombo,
-            CB_GETLBTEXT,
-            static_cast<WPARAM>(previous_index),
-            reinterpret_cast<LPARAM>(previous_drive));
-    }
-
+    const wchar_t previous_drive = SelectedDriveLetter();
     SendMessageW(g_driveCombo, CB_RESETCONTENT, 0, 0);
 
     int selected_index = -1;
@@ -86,7 +216,7 @@ void RefreshDriveList() {
             continue;
         }
 
-        if (previous_drive[0] != L'\0' && lstrcmpW(previous_drive, drive_label) == 0) {
+        if (previous_drive != L'\0' && previous_drive == drive_label[0]) {
             selected_index = static_cast<int>(added_index);
         }
     }
@@ -97,6 +227,49 @@ void RefreshDriveList() {
     if (selected_index >= 0) {
         SendMessageW(g_driveCombo, CB_SETCURSEL, static_cast<WPARAM>(selected_index), 0);
     }
+
+    RefreshNormalizedPathState();
+}
+
+void ApplyNormalizedPath() {
+    if (g_pathEdit == nullptr) {
+        return;
+    }
+
+    const NormalizedPath normalized = NormalizePathText(ReadControlText(g_pathEdit));
+    bool drive_selected = true;
+
+    if (normalized.drive != L'\0') {
+        RefreshDriveList();
+        drive_selected = SelectDrive(normalized.drive);
+    }
+
+    std::wstring display_text;
+    if (normalized.drive != L'\0' && !drive_selected) {
+        display_text.push_back(normalized.drive);
+        display_text += L":\\";
+        display_text += normalized.relative;
+    } else {
+        display_text = normalized.relative;
+    }
+
+    SetWindowTextW(g_pathEdit, display_text.c_str());
+    SendMessageW(
+        g_pathEdit,
+        EM_SETSEL,
+        static_cast<WPARAM>(display_text.size()),
+        static_cast<LPARAM>(display_text.size()));
+    RefreshNormalizedPathState();
+}
+
+RECT ProgressBounds(const RECT& client) {
+    const int left = kControlsLeft + kScanButtonWidth + kControlGap;
+    const int top = kRowThreeTop + (kControlHeight - kProgressHeight) / 2;
+    return RECT{
+        left,
+        top,
+        client.right - kContentPadding,
+        top + kProgressHeight};
 }
 
 void PaintWindow(HWND window) {
@@ -128,7 +301,22 @@ void PaintWindow(HWND window) {
         SelectObject(dc, previous_font);
     }
 
+    const RECT progress = ProgressBounds(client);
+    FrameRect(dc, &progress, reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+
     EndPaint(window, &paint);
+}
+
+LRESULT CALLBACK PathEditProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    if (message == WM_KEYDOWN && wparam == VK_RETURN) {
+        ApplyNormalizedPath();
+        return 0;
+    }
+    if (message == WM_CHAR && wparam == VK_RETURN) {
+        return 0;
+    }
+
+    return CallWindowProcW(g_pathEditOriginalProc, window, message, wparam, lparam);
 }
 
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -141,6 +329,24 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
     case WM_NCHITTEST: {
         const LRESULT hit = DefWindowProcW(window, message, wparam, lparam);
         return hit == HTCLIENT ? HTCAPTION : hit;
+    }
+    case WM_COMMAND: {
+        const int control_id = LOWORD(wparam);
+        const int notification = HIWORD(wparam);
+
+        if (control_id == kRefreshButtonId && notification == BN_CLICKED) {
+            RefreshDriveList();
+            return 0;
+        }
+        if (control_id == kPathEditId && notification == EN_CHANGE) {
+            RefreshNormalizedPathState();
+            return 0;
+        }
+        if (control_id == kDriveComboId && notification == CBN_SELCHANGE) {
+            RefreshNormalizedPathState();
+            return 0;
+        }
+        break;
     }
     case WM_SYSKEYDOWN:
         if (wparam == L'S' && (GetKeyState(VK_MENU) & 0x8000) != 0) {
@@ -165,7 +371,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
     case WM_DESTROY:
         EndActivityIfActive();
         g_driveCombo = nullptr;
+        g_refreshButton = nullptr;
         g_pathEdit = nullptr;
+        g_exportNameEdit = nullptr;
+        g_extensionCombo = nullptr;
+        g_scanButton = nullptr;
         g_window = nullptr;
         return 0;
     default:
@@ -203,16 +413,19 @@ void PositionWindow(HWND anchor_window) {
 }
 
 bool CreateControls() {
-    const int path_left = kContentPadding + kDriveWidth + kControlGap;
+    const int refresh_left = kControlsLeft + kDriveWidth + kControlGap;
+    const int path_left = refresh_left + kRefreshSize + kControlGap;
     const int path_width = kWindowWidth - path_left - kContentPadding;
+    const int extension_left = kWindowWidth - kContentPadding - kExtensionWidth;
+    const int export_width = extension_left - kControlGap - kControlsLeft;
 
     g_driveCombo = CreateWindowExW(
         0,
         L"COMBOBOX",
         L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
-        kContentPadding,
-        kControlsTop,
+        kControlsLeft,
+        kRowOneTop,
         kDriveWidth,
         220,
         g_window,
@@ -223,13 +436,30 @@ bool CreateControls() {
         return false;
     }
 
+    g_refreshButton = CreateWindowExW(
+        0,
+        L"BUTTON",
+        L"\x21BB",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+        refresh_left,
+        kRowOneTop,
+        kRefreshSize,
+        kRefreshSize,
+        g_window,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kRefreshButtonId)),
+        g_instance,
+        nullptr);
+    if (g_refreshButton == nullptr) {
+        return false;
+    }
+
     g_pathEdit = CreateWindowExW(
         0,
         L"EDIT",
         L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL,
         path_left,
-        kControlsTop,
+        kRowOneTop,
         path_width,
         kControlHeight,
         g_window,
@@ -240,9 +470,82 @@ bool CreateControls() {
         return false;
     }
 
+    g_exportNameEdit = CreateWindowExW(
+        0,
+        L"EDIT",
+        L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL,
+        kControlsLeft,
+        kRowTwoTop,
+        export_width,
+        kControlHeight,
+        g_window,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kExportNameEditId)),
+        g_instance,
+        nullptr);
+    if (g_exportNameEdit == nullptr) {
+        return false;
+    }
+
+    g_extensionCombo = CreateWindowExW(
+        0,
+        L"COMBOBOX",
+        L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
+        extension_left,
+        kRowTwoTop,
+        kExtensionWidth,
+        180,
+        g_window,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kExtensionComboId)),
+        g_instance,
+        nullptr);
+    if (g_extensionCombo == nullptr) {
+        return false;
+    }
+
+    g_scanButton = CreateWindowExW(
+        0,
+        L"BUTTON",
+        L"Scan",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_DISABLED | BS_PUSHBUTTON,
+        kControlsLeft,
+        kRowThreeTop,
+        kScanButtonWidth,
+        kControlHeight,
+        g_window,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kScanButtonId)),
+        g_instance,
+        nullptr);
+    if (g_scanButton == nullptr) {
+        return false;
+    }
+
     SendMessageW(g_driveCombo, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
+    SendMessageW(g_refreshButton, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
     SendMessageW(g_pathEdit, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
+    SendMessageW(g_exportNameEdit, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
+    SendMessageW(g_extensionCombo, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
+    SendMessageW(g_scanButton, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
+
+    SendMessageW(g_extensionCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"txt"));
+    SendMessageW(g_extensionCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"csv"));
+    SendMessageW(g_extensionCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"xlsx"));
+    SendMessageW(g_extensionCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"xlsm"));
+    SendMessageW(g_extensionCombo, CB_SETCURSEL, 2, 0);
+
+    SetLastError(ERROR_SUCCESS);
+    const LONG_PTR previous_proc = SetWindowLongPtrW(
+        g_pathEdit,
+        GWLP_WNDPROC,
+        reinterpret_cast<LONG_PTR>(PathEditProc));
+    if (previous_proc == 0 && GetLastError() != ERROR_SUCCESS) {
+        return false;
+    }
+    g_pathEditOriginalProc = reinterpret_cast<WNDPROC>(previous_proc);
+
     RefreshDriveList();
+    RefreshNormalizedPathState();
     return true;
 }
 } // namespace
@@ -346,6 +649,7 @@ bool Initialize(HINSTANCE instance) {
         DeleteObject(g_bodyFont);
         g_titleFont = nullptr;
         g_bodyFont = nullptr;
+        g_pathEditOriginalProc = nullptr;
         UnregisterClassW(kClassName, g_instance);
         g_instance = nullptr;
         return false;
@@ -409,7 +713,16 @@ void Shutdown() {
         g_instance = nullptr;
     }
 
+    g_driveCombo = nullptr;
+    g_refreshButton = nullptr;
+    g_pathEdit = nullptr;
+    g_exportNameEdit = nullptr;
+    g_extensionCombo = nullptr;
+    g_scanButton = nullptr;
     g_anchorWindow = nullptr;
+    g_pathEditOriginalProc = nullptr;
+    g_normalizedRelativePath.clear();
+    g_normalizedDrive = L'\0';
     g_positionInitialized = false;
 }
 

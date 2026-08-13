@@ -4,7 +4,8 @@
 
 namespace ScannerWindow {
 
-bool Show(HWND anchor_window);
+bool Initialize(HINSTANCE instance);
+bool Toggle(HWND anchor_window);
 void Shutdown();
 
 } // namespace ScannerWindow

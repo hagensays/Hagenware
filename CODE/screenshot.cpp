@@ -305,8 +305,11 @@ LRESULT CALLBACK IndicatorWindowProc(HWND window, UINT message, WPARAM wparam, L
         return 0;
     case WM_ERASEBKGND:
         return 1;
-    case WM_NCHITTEST:
-        return HTTRANSPARENT;
+    case WM_MOUSEACTIVATE:
+        return MA_NOACTIVATE;
+    case WM_LBUTTONDOWN:
+        PostMessageW(window, kCaptureMessage, 0, 0);
+        return 0;
     case kCaptureMessage:
         if (g_deckWindow != nullptr &&
             IsWindow(g_deckWindow) != FALSE &&
@@ -333,6 +336,7 @@ bool Initialize() {
     WNDCLASSW window_class{};
     window_class.lpfnWndProc = IndicatorWindowProc;
     window_class.hInstance = g_instance;
+    window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     window_class.hbrBackground = reinterpret_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));
     window_class.lpszClassName = kIndicatorClassName;
 
@@ -342,7 +346,7 @@ bool Initialize() {
     }
 
     g_indicatorWindow = CreateWindowExW(
-        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
         kIndicatorClassName,
         L"",
         WS_POPUP,
@@ -379,6 +383,21 @@ void ShowIndicatorForDeck(HWND deck_window) {
 void HideIndicator() {
     g_deckWindow = nullptr;
     HideIndicatorWindow();
+}
+
+bool IsIndicatorPoint(POINT point) {
+    if (g_indicatorWindow == nullptr ||
+        g_deckWindow == nullptr ||
+        IsWindowVisible(g_indicatorWindow) == FALSE) {
+        return false;
+    }
+
+    RECT indicator_rect{};
+    if (GetWindowRect(g_indicatorWindow, &indicator_rect) == FALSE) {
+        return false;
+    }
+
+    return PtInRect(&indicator_rect, point) != FALSE;
 }
 
 void RequestCapture() {

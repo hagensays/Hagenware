@@ -7,6 +7,8 @@
 #include <string>
 
 #include "deck.h"
+#include "grid.h"
+#include "status_indicator.h"
 
 namespace {
 constexpr wchar_t kIndicatorClassName[] = L"HagenwareScreenshotIndicator";
@@ -16,9 +18,17 @@ constexpr int kIndicatorHeight = 18;
 constexpr int kIndicatorMargin = 14;
 constexpr DWORD kModulePathCapacity = 32768;
 
+enum class IndicatorMode {
+    None,
+    Deck,
+    Grid,
+};
+
 HINSTANCE g_instance = nullptr;
 HWND g_indicatorWindow = nullptr;
-HWND g_deckWindow = nullptr;
+HWND g_surfaceWindow = nullptr;
+HWND g_captureTargetWindow = nullptr;
+IndicatorMode g_indicatorMode = IndicatorMode::None;
 
 bool PositionIndicator(HWND anchor_window) {
     if (g_indicatorWindow == nullptr || anchor_window == nullptr || IsWindow(anchor_window) == FALSE) {
@@ -159,11 +169,20 @@ bool WriteAll(HANDLE file, const void* data, DWORD size) {
     return true;
 }
 
-bool CaptureVirtualDesktop() {
-    const int x = GetSystemMetrics(SM_XVIRTUALSCREEN);
-    const int y = GetSystemMetrics(SM_YVIRTUALSCREEN);
-    const int width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-    const int height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+bool CaptureScreenRect(const RECT& requested_rect) {
+    const RECT virtual_desktop{
+        GetSystemMetrics(SM_XVIRTUALSCREEN),
+        GetSystemMetrics(SM_YVIRTUALSCREEN),
+        GetSystemMetrics(SM_XVIRTUALSCREEN) + GetSystemMetrics(SM_CXVIRTUALSCREEN),
+        GetSystemMetrics(SM_YVIRTUALSCREEN) + GetSystemMetrics(SM_CYVIRTUALSCREEN)};
+
+    RECT capture_rect{};
+    if (IntersectRect(&capture_rect, &requested_rect, &virtual_desktop) == FALSE) {
+        return false;
+    }
+
+    const int width = static_cast<int>(capture_rect.right - capture_rect.left);
+    const int height = static_cast<int>(capture_rect.bottom - capture_rect.top);
     if (width <= 0 || height <= 0) {
         return false;
     }
@@ -235,8 +254,8 @@ bool CaptureVirtualDesktop() {
         width,
         height,
         screen_dc,
-        x,
-        y,
+        capture_rect.left,
+        capture_rect.top,
         SRCCOPY | CAPTUREBLT);
 
     SelectObject(memory_dc, previous_bitmap);
@@ -275,17 +294,87 @@ bool CaptureVirtualDesktop() {
     return saved;
 }
 
+bool CaptureVirtualDesktop() {
+    const int x = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    const int y = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    const int width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    const int height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+
+    return CaptureScreenRect(RECT{x, y, x + width, y + height});
+}
+
+bool GetWindowCaptureBounds(HWND target, RECT* bounds) {
+    if (target == nullptr || bounds == nullptr || IsWindow(target) == FALSE) {
+        return false;
+    }
+
+    RECT rect{};
+    if (DwmGetWindowAttribute(
+            target,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &rect,
+            sizeof(rect)) != S_OK) {
+        if (GetWindowRect(target, &rect) == FALSE) {
+            return false;
+        }
+    }
+
+    if (rect.right <= rect.left || rect.bottom <= rect.top) {
+        return false;
+    }
+
+    *bounds = rect;
+    return true;
+}
+
+bool CaptureWindow(HWND target) {
+    RECT bounds{};
+    return GetWindowCaptureBounds(target, &bounds) && CaptureScreenRect(bounds);
+}
+
 void CaptureUnderDeck() {
-    if (g_deckWindow == nullptr ||
-        IsWindow(g_deckWindow) == FALSE ||
-        IsWindowVisible(g_deckWindow) == FALSE) {
+    if (g_surfaceWindow == nullptr ||
+        IsWindow(g_surfaceWindow) == FALSE ||
+        IsWindowVisible(g_surfaceWindow) == FALSE) {
         return;
     }
 
+    StatusIndicator::Hide();
     Deck::DismissForPassThrough();
     DwmFlush();
     CaptureVirtualDesktop();
     Deck::Show();
+    StatusIndicator::Show();
+}
+
+void CaptureGridTarget() {
+    HWND target = g_captureTargetWindow;
+    if (g_surfaceWindow == nullptr ||
+        IsWindow(g_surfaceWindow) == FALSE ||
+        IsWindowVisible(g_surfaceWindow) == FALSE ||
+        target == nullptr ||
+        IsWindow(target) == FALSE) {
+        return;
+    }
+
+    StatusIndicator::Hide();
+    Grid::DismissForPassThrough();
+    DwmFlush();
+    CaptureWindow(target);
+    Grid::Show();
+    StatusIndicator::Show();
+}
+
+void CaptureActiveSurface() {
+    const IndicatorMode mode = g_indicatorMode;
+    if (mode == IndicatorMode::Deck) {
+        CaptureUnderDeck();
+    } else if (mode == IndicatorMode::Grid) {
+        CaptureGridTarget();
+    }
 }
 
 void PaintIndicator(HWND window) {
@@ -328,7 +417,7 @@ LRESULT CALLBACK IndicatorWindowProc(HWND window, UINT message, WPARAM wparam, L
         PostMessageW(window, kCaptureMessage, 0, 0);
         return 0;
     case kCaptureMessage:
-        CaptureUnderDeck();
+        CaptureActiveSurface();
         return 0;
     default:
         return DefWindowProcW(window, message, wparam, lparam);
@@ -389,20 +478,42 @@ void ShowIndicatorForDeck(HWND deck_window) {
         return;
     }
 
-    g_deckWindow = deck_window;
+    g_surfaceWindow = deck_window;
+    g_captureTargetWindow = nullptr;
+    g_indicatorMode = IndicatorMode::Deck;
     if (!PositionIndicator(deck_window)) {
         HideIndicator();
     }
 }
 
+void ShowIndicatorForGrid(HWND grid_window, HWND target_window) {
+    if (grid_window == nullptr ||
+        IsWindow(grid_window) == FALSE ||
+        IsWindowVisible(grid_window) == FALSE ||
+        target_window == nullptr ||
+        IsWindow(target_window) == FALSE) {
+        HideIndicator();
+        return;
+    }
+
+    g_surfaceWindow = grid_window;
+    g_captureTargetWindow = target_window;
+    g_indicatorMode = IndicatorMode::Grid;
+    if (!PositionIndicator(grid_window)) {
+        HideIndicator();
+    }
+}
+
 void HideIndicator() {
-    g_deckWindow = nullptr;
+    g_surfaceWindow = nullptr;
+    g_captureTargetWindow = nullptr;
+    g_indicatorMode = IndicatorMode::None;
     HideIndicatorWindow();
 }
 
 bool IsIndicatorPoint(POINT point) {
     if (g_indicatorWindow == nullptr ||
-        g_deckWindow == nullptr ||
+        g_indicatorMode == IndicatorMode::None ||
         IsWindowVisible(g_indicatorWindow) == FALSE) {
         return false;
     }

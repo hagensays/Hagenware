@@ -2,6 +2,7 @@
 
 #include "input_dismiss.h"
 #include "lifecycle.h"
+#include "screenshot.h"
 
 namespace {
 constexpr wchar_t kGridClassName[] = L"HagenwareGrid";
@@ -365,6 +366,7 @@ void Show() {
 
     InvalidateRect(g_window, nullptr, FALSE);
     UpdateWindow(g_window);
+    Screenshot::ShowIndicatorForGrid(g_window, target);
     FocusGrid();
 }
 
@@ -375,6 +377,7 @@ void Hide() {
 
     g_hiding = true;
     InputDismiss::Deactivate(g_window);
+    Screenshot::HideIndicator();
 
     if (IsWindowVisible(g_window) != FALSE) {
         ShowWindow(g_window, SW_HIDE);

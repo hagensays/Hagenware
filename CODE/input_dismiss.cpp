@@ -67,7 +67,7 @@ bool IsPointInsideActiveSurface(const POINT& point) {
         return false;
     }
 
-    if (g_surfaceKind == SurfaceKind::Deck && Screenshot::IsIndicatorPoint(point)) {
+    if (Screenshot::IsIndicatorPoint(point)) {
         return true;
     }
 

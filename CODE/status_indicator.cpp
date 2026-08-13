@@ -3,19 +3,20 @@
 namespace {
 constexpr wchar_t kStatusIndicatorClassName[] = L"HagenwareStatusIndicator";
 constexpr int kIndicatorWidth = 80;
-constexpr int kIndicatorHeight = 2;
-constexpr COLORREF kIndicatorColor = RGB(220, 0, 0);
+constexpr int kIndicatorHeight = 3;
+constexpr COLORREF kIndicatorColor = RGB(255, 0, 0);
 
 HINSTANCE g_instance = nullptr;
 HWND g_window = nullptr;
 HBRUSH g_brush = nullptr;
+bool g_visible = false;
 
 void PositionIndicator() {
     if (g_window == nullptr) {
         return;
     }
 
-    RECT monitor_rect{
+    RECT work_area{
         0,
         0,
         GetSystemMetrics(SM_CXSCREEN),
@@ -25,13 +26,18 @@ void PositionIndicator() {
     monitor_info.cbSize = sizeof(monitor_info);
     const HMONITOR monitor = MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
     if (monitor != nullptr && GetMonitorInfoW(monitor, &monitor_info) != FALSE) {
-        monitor_rect = monitor_info.rcMonitor;
+        work_area = monitor_info.rcWork;
     }
 
-    const int monitor_width = static_cast<int>(monitor_rect.right - monitor_rect.left);
-    const int indicator_width = monitor_width < kIndicatorWidth ? monitor_width : kIndicatorWidth;
-    const int x = monitor_rect.left + (monitor_width - indicator_width) / 2;
-    const int y = monitor_rect.bottom - kIndicatorHeight;
+    const int work_width = static_cast<int>(work_area.right - work_area.left);
+    const int indicator_width = work_width < kIndicatorWidth ? work_width : kIndicatorWidth;
+    const int x = work_area.left + (work_width - indicator_width) / 2;
+    const int y = work_area.bottom - kIndicatorHeight;
+
+    UINT flags = SWP_NOACTIVATE;
+    if (g_visible) {
+        flags |= SWP_SHOWWINDOW;
+    }
 
     SetWindowPos(
         g_window,
@@ -40,7 +46,7 @@ void PositionIndicator() {
         y,
         indicator_width,
         kIndicatorHeight,
-        SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        flags);
 }
 
 LRESULT CALLBACK StatusIndicatorWindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -62,6 +68,11 @@ LRESULT CALLBACK StatusIndicatorWindowProc(HWND window, UINT message, WPARAM wpa
         return MA_NOACTIVATE;
     case WM_DISPLAYCHANGE:
         PositionIndicator();
+        return 0;
+    case WM_SETTINGCHANGE:
+        if (wparam == SPI_SETWORKAREA) {
+            PositionIndicator();
+        }
         return 0;
     default:
         return DefWindowProcW(window, message, wparam, lparam);
@@ -122,12 +133,42 @@ bool Initialize(HINSTANCE instance) {
         return false;
     }
 
-    SetLayeredWindowAttributes(g_window, 0, 255, LWA_ALPHA);
+    if (SetLayeredWindowAttributes(g_window, 0, 255, LWA_ALPHA) == FALSE) {
+        HWND window = g_window;
+        g_window = nullptr;
+        DestroyWindow(window);
+        UnregisterClassW(kStatusIndicatorClassName, instance);
+        DeleteObject(g_brush);
+        g_brush = nullptr;
+        g_instance = nullptr;
+        return false;
+    }
+
+    g_visible = true;
     PositionIndicator();
     return true;
 }
 
+void Show() {
+    if (g_window == nullptr) {
+        return;
+    }
+
+    g_visible = true;
+    PositionIndicator();
+    InvalidateRect(g_window, nullptr, FALSE);
+}
+
+void Hide() {
+    g_visible = false;
+    if (g_window != nullptr && IsWindowVisible(g_window) != FALSE) {
+        ShowWindow(g_window, SW_HIDE);
+    }
+}
+
 void Shutdown() {
+    g_visible = false;
+
     if (g_window != nullptr) {
         HWND window = g_window;
         g_window = nullptr;

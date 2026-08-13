@@ -15,17 +15,24 @@ constexpr DWORD kModulePathCapacity = 32768;
 
 HINSTANCE g_instance = nullptr;
 HWND g_indicatorWindow = nullptr;
-HWND g_deckWindow = nullptr;
 
-bool PositionIndicator(HWND deck_window) {
-    if (g_indicatorWindow == nullptr || deck_window == nullptr) {
+bool PositionIndicator(HWND anchor_window) {
+    if (g_indicatorWindow == nullptr) {
         return false;
+    }
+
+    HMONITOR monitor = nullptr;
+    if (anchor_window != nullptr && IsWindow(anchor_window) != FALSE) {
+        monitor = MonitorFromWindow(anchor_window, MONITOR_DEFAULTTONEAREST);
+    }
+    if (monitor == nullptr) {
+        const POINT origin{0, 0};
+        monitor = MonitorFromPoint(origin, MONITOR_DEFAULTTOPRIMARY);
     }
 
     MONITORINFO monitor_info{};
     monitor_info.cbSize = sizeof(monitor_info);
-    const HMONITOR monitor = MonitorFromWindow(deck_window, MONITOR_DEFAULTTONEAREST);
-    if (GetMonitorInfoW(monitor, &monitor_info) == FALSE) {
+    if (monitor == nullptr || GetMonitorInfoW(monitor, &monitor_info) == FALSE) {
         return false;
     }
 
@@ -311,11 +318,7 @@ LRESULT CALLBACK IndicatorWindowProc(HWND window, UINT message, WPARAM wparam, L
         PostMessageW(window, kCaptureMessage, 0, 0);
         return 0;
     case kCaptureMessage:
-        if (g_deckWindow != nullptr &&
-            IsWindow(g_deckWindow) != FALSE &&
-            IsWindowVisible(g_deckWindow) != FALSE) {
-            CaptureVirtualDesktop();
-        }
+        CaptureVirtualDesktop();
         return 0;
     default:
         return DefWindowProcW(window, message, wparam, lparam);
@@ -365,30 +368,32 @@ bool Initialize() {
         return false;
     }
 
+    if (!PositionIndicator(GetForegroundWindow())) {
+        HWND window = g_indicatorWindow;
+        g_indicatorWindow = nullptr;
+        DestroyWindow(window);
+        UnregisterClassW(kIndicatorClassName, g_instance);
+        g_instance = nullptr;
+        return false;
+    }
+
     return true;
 }
 
 void ShowIndicatorForDeck(HWND deck_window) {
-    if (deck_window == nullptr || IsWindow(deck_window) == FALSE) {
-        HideIndicator();
-        return;
-    }
-
-    g_deckWindow = deck_window;
-    if (!PositionIndicator(deck_window)) {
-        HideIndicatorWindow();
+    if (deck_window != nullptr && IsWindow(deck_window) != FALSE) {
+        PositionIndicator(deck_window);
     }
 }
 
 void HideIndicator() {
-    g_deckWindow = nullptr;
-    HideIndicatorWindow();
+    if (g_indicatorWindow != nullptr && IsWindowVisible(g_indicatorWindow) == FALSE) {
+        PositionIndicator(GetForegroundWindow());
+    }
 }
 
 bool IsIndicatorPoint(POINT point) {
-    if (g_indicatorWindow == nullptr ||
-        g_deckWindow == nullptr ||
-        IsWindowVisible(g_indicatorWindow) == FALSE) {
+    if (g_indicatorWindow == nullptr || IsWindowVisible(g_indicatorWindow) == FALSE) {
         return false;
     }
 
@@ -400,14 +405,8 @@ bool IsIndicatorPoint(POINT point) {
     return PtInRect(&indicator_rect, point) != FALSE;
 }
 
-void RequestCapture() {
-    if (g_indicatorWindow != nullptr && g_deckWindow != nullptr) {
-        PostMessageW(g_indicatorWindow, kCaptureMessage, 0, 0);
-    }
-}
-
 void Shutdown() {
-    HideIndicator();
+    HideIndicatorWindow();
 
     if (g_indicatorWindow != nullptr) {
         DestroyWindow(g_indicatorWindow);

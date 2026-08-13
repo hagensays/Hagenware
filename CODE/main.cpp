@@ -7,6 +7,7 @@
 #include "input_dismiss.h"
 #include "instance_handoff.h"
 #include "lifecycle.h"
+#include "scanner_window.h"
 #include "screenshot.h"
 #include "status_indicator.h"
 #include "trigger.h"
@@ -55,6 +56,25 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
             Grid::Show();
         }
         return 0;
+    case WM_SYSKEYDOWN:
+        if (wparam == L'S' &&
+            (GetKeyState(VK_MENU) & 0x8000) != 0 &&
+            GetForegroundWindow() == window) {
+            if (!ScannerWindow::Show(window)) {
+                MessageBoxW(
+                    window,
+                    L"The Hagenware Scanner window could not be opened.",
+                    L"Hagenware",
+                    MB_OK | MB_ICONERROR);
+            }
+            return 0;
+        }
+        break;
+    case WM_SYSCHAR:
+        if (wparam == L's' || wparam == L'S') {
+            return 0;
+        }
+        break;
     case WM_KEYDOWN:
         if (wparam == VK_F1 && GetForegroundWindow() == window) {
             if (!Wiki::Open(window)) {
@@ -222,6 +242,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
         break;
     }
 
+    ScannerWindow::Shutdown();
     StatusIndicator::Shutdown();
     Trigger::Stop();
     InputDismiss::Stop();

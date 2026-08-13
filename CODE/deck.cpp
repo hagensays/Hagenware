@@ -28,6 +28,7 @@ struct WindowEntry {
     HWND window = nullptr;
     std::wstring title;
     HTHUMBNAIL thumbnail = nullptr;
+    size_t recent_rank = 0;
 };
 
 HINSTANCE g_instance = nullptr;
@@ -64,12 +65,24 @@ bool IsCandidateWindow(HWND window) {
         return false;
     }
 
+    if (GetWindowTextLengthW(window) <= 0) {
+        return false;
+    }
+
     DWORD cloaked = 0;
     if (SUCCEEDED(DwmGetWindowAttribute(window, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked != 0) {
         return false;
     }
 
-    return GetWindowTextLengthW(window) > 0;
+    return true;
+}
+
+size_t RecentRank(HWND window) {
+    const auto found = std::find(g_recentWindows.begin(), g_recentWindows.end(), window);
+    if (found == g_recentWindows.end()) {
+        return g_recentWindows.size();
+    }
+    return static_cast<size_t>(found - g_recentWindows.begin());
 }
 
 void RememberWindow(HWND window) {
@@ -119,7 +132,7 @@ BOOL CALLBACK EnumerateWindow(HWND window, LPARAM context) {
 
     title.resize(static_cast<size_t>(copied));
     auto* entries = reinterpret_cast<std::vector<WindowEntry>*>(context);
-    entries->push_back(WindowEntry{window, title, nullptr});
+    entries->push_back(WindowEntry{window, title, nullptr, RecentRank(window)});
     return TRUE;
 }
 
@@ -160,34 +173,30 @@ void EndActivityIfActive() {
     }
 }
 
-size_t RecentRank(HWND window) {
-    const auto found = std::find(g_recentWindows.begin(), g_recentWindows.end(), window);
-    if (found == g_recentWindows.end()) {
-        return g_recentWindows.size();
-    }
-    return static_cast<size_t>(found - g_recentWindows.begin());
-}
-
 void RefreshEntries() {
     ClearEntries();
-
-    g_recentWindows.erase(
-        std::remove_if(
-            g_recentWindows.begin(),
-            g_recentWindows.end(),
-            [](HWND window) {
-                return !IsCandidateWindow(window);
-            }),
-        g_recentWindows.end());
-
     EnumWindows(EnumerateWindow, reinterpret_cast<LPARAM>(&g_entries));
 
     std::stable_sort(
         g_entries.begin(),
         g_entries.end(),
         [](const WindowEntry& left, const WindowEntry& right) {
-            return RecentRank(left.window) < RecentRank(right.window);
+            return left.recent_rank < right.recent_rank;
         });
+
+    g_recentWindows.erase(
+        std::remove_if(
+            g_recentWindows.begin(),
+            g_recentWindows.end(),
+            [](HWND recent_window) {
+                return std::find_if(
+                    g_entries.begin(),
+                    g_entries.end(),
+                    [recent_window](const WindowEntry& entry) {
+                        return entry.window == recent_window;
+                    }) == g_entries.end();
+            }),
+        g_recentWindows.end());
 
     for (const WindowEntry& entry : g_entries) {
         if (std::find(g_recentWindows.begin(), g_recentWindows.end(), entry.window) == g_recentWindows.end()) {
@@ -255,28 +264,38 @@ void EnsureSelectedVisible() {
     }
 }
 
-void UpdateThumbnailLayout() {
+void SyncVisibleThumbnails() {
     for (size_t i = 0; i < g_entries.size(); ++i) {
         WindowEntry& entry = g_entries[i];
+        const int index = static_cast<int>(i);
+        const bool visible = index >= g_firstVisible && index < g_firstVisible + g_visibleCount;
+
+        if (!visible) {
+            if (entry.thumbnail != nullptr) {
+                DwmUnregisterThumbnail(entry.thumbnail);
+                entry.thumbnail = nullptr;
+            }
+            continue;
+        }
+
+        if (entry.thumbnail == nullptr) {
+            HTHUMBNAIL thumbnail = nullptr;
+            if (SUCCEEDED(DwmRegisterThumbnail(g_window, entry.window, &thumbnail))) {
+                entry.thumbnail = thumbnail;
+            }
+        }
+
         if (entry.thumbnail == nullptr) {
             continue;
         }
 
-        const int index = static_cast<int>(i);
-        const bool visible = index >= g_firstVisible && index < g_firstVisible + g_visibleCount;
-        DWM_THUMBNAIL_PROPERTIES properties{};
-
-        if (!visible) {
-            properties.dwFlags = DWM_TNP_VISIBLE;
-            properties.fVisible = FALSE;
-            DwmUpdateThumbnailProperties(entry.thumbnail, &properties);
+        SIZE source_size{};
+        if (FAILED(DwmQueryThumbnailSourceSize(entry.thumbnail, &source_size))) {
             continue;
         }
 
-        SIZE source_size{};
-        DwmQueryThumbnailSourceSize(entry.thumbnail, &source_size);
         const RECT destination = FitThumbnail(PreviewBounds(index - g_firstVisible), source_size);
-
+        DWM_THUMBNAIL_PROPERTIES properties{};
         properties.dwFlags = DWM_TNP_RECTDESTINATION |
             DWM_TNP_VISIBLE |
             DWM_TNP_OPACITY |
@@ -286,16 +305,6 @@ void UpdateThumbnailLayout() {
         properties.fVisible = TRUE;
         properties.fSourceClientAreaOnly = FALSE;
         DwmUpdateThumbnailProperties(entry.thumbnail, &properties);
-    }
-}
-
-void RegisterThumbnails() {
-    ClearThumbnails();
-    for (WindowEntry& entry : g_entries) {
-        HTHUMBNAIL thumbnail = nullptr;
-        if (SUCCEEDED(DwmRegisterThumbnail(g_window, entry.window, &thumbnail))) {
-            entry.thumbnail = thumbnail;
-        }
     }
 }
 
@@ -311,8 +320,11 @@ void MoveSelection(int direction) {
         g_selected = g_selected + 1 == count ? 0 : g_selected + 1;
     }
 
+    const int previous_first_visible = g_firstVisible;
     EnsureSelectedVisible();
-    UpdateThumbnailLayout();
+    if (g_firstVisible != previous_first_visible) {
+        SyncVisibleThumbnails();
+    }
     InvalidateRect(g_window, nullptr, FALSE);
 }
 
@@ -728,9 +740,7 @@ void Show() {
     }
 
     EnsureSelectedVisible();
-    UpdateWindow(g_window);
-    RegisterThumbnails();
-    UpdateThumbnailLayout();
+    SyncVisibleThumbnails();
     InvalidateRect(g_window, nullptr, FALSE);
     Screenshot::ShowIndicatorForDeck(g_window);
     FocusDeck();

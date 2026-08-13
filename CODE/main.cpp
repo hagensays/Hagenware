@@ -60,10 +60,10 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
         if (wparam == L'S' &&
             (GetKeyState(VK_MENU) & 0x8000) != 0 &&
             GetForegroundWindow() == window) {
-            if (!ScannerWindow::Show(window)) {
+            if (!ScannerWindow::Toggle(window)) {
                 MessageBoxW(
                     window,
-                    L"The Hagenware Scanner window could not be opened.",
+                    L"The Hagenware Scanner window could not be toggled.",
                     L"Hagenware",
                     MB_OK | MB_ICONERROR);
             }
@@ -210,6 +210,19 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
     }
 
     if (!StatusIndicator::Initialize(instance)) {
+        Trigger::Stop();
+        InputDismiss::Stop();
+        Screenshot::Shutdown();
+        Grid::Shutdown();
+        Deck::Shutdown();
+        Lifecycle::Shutdown();
+        DestroyHostWindow(window, instance);
+        InstanceHandoff::EndStartup();
+        return 1;
+    }
+
+    if (!ScannerWindow::Initialize(instance)) {
+        StatusIndicator::Shutdown();
         Trigger::Stop();
         InputDismiss::Stop();
         Screenshot::Shutdown();

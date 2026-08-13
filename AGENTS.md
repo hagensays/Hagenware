@@ -35,6 +35,12 @@ A lean codebase does not mean minimizing lines of code. Use as many lines as nee
 - Do not guess compatibility requirements. Windows support targets must be explicit; do not add compatibility hacks for unspecified or unsupported versions.
 - Keep each version focused and reviewable; do not bundle unrelated refactors with a requested change.
 
+## Scanner
+
+- The Scanner is observation-only. Except for an explicit user-requested export of scan results, scanning must not create, modify, rename, delete, move, write to, or change metadata, attributes, permissions, ownership, or timestamps of scanned files or directories.
+- An export may write only the requested result artifact; it must not modify the scanned source items.
+- Prefer metadata enumeration and read-only inspection APIs. Scanner features remain request-driven; do not add speculative behavior.
+
 ## Development Speed
 
 Development speed is one of the biggest wins of the current setup.

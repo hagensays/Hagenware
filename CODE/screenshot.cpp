@@ -1,9 +1,12 @@
 #include "screenshot.h"
 
+#include <dwmapi.h>
 #include <windows.h>
 
 #include <cwchar>
 #include <string>
+
+#include "deck.h"
 
 namespace {
 constexpr wchar_t kIndicatorClassName[] = L"HagenwareScreenshotIndicator";
@@ -15,20 +18,14 @@ constexpr DWORD kModulePathCapacity = 32768;
 
 HINSTANCE g_instance = nullptr;
 HWND g_indicatorWindow = nullptr;
+HWND g_deckWindow = nullptr;
 
 bool PositionIndicator(HWND anchor_window) {
-    if (g_indicatorWindow == nullptr) {
+    if (g_indicatorWindow == nullptr || anchor_window == nullptr || IsWindow(anchor_window) == FALSE) {
         return false;
     }
 
-    HMONITOR monitor = nullptr;
-    if (anchor_window != nullptr && IsWindow(anchor_window) != FALSE) {
-        monitor = MonitorFromWindow(anchor_window, MONITOR_DEFAULTTONEAREST);
-    }
-    if (monitor == nullptr) {
-        const POINT origin{0, 0};
-        monitor = MonitorFromPoint(origin, MONITOR_DEFAULTTOPRIMARY);
-    }
+    const HMONITOR monitor = MonitorFromWindow(anchor_window, MONITOR_DEFAULTTONEAREST);
 
     MONITORINFO monitor_info{};
     monitor_info.cbSize = sizeof(monitor_info);
@@ -278,6 +275,19 @@ bool CaptureVirtualDesktop() {
     return saved;
 }
 
+void CaptureUnderDeck() {
+    if (g_deckWindow == nullptr ||
+        IsWindow(g_deckWindow) == FALSE ||
+        IsWindowVisible(g_deckWindow) == FALSE) {
+        return;
+    }
+
+    Deck::DismissForPassThrough();
+    DwmFlush();
+    CaptureVirtualDesktop();
+    Deck::Show();
+}
+
 void PaintIndicator(HWND window) {
     PAINTSTRUCT paint{};
     HDC dc = BeginPaint(window, &paint);
@@ -318,7 +328,7 @@ LRESULT CALLBACK IndicatorWindowProc(HWND window, UINT message, WPARAM wparam, L
         PostMessageW(window, kCaptureMessage, 0, 0);
         return 0;
     case kCaptureMessage:
-        CaptureVirtualDesktop();
+        CaptureUnderDeck();
         return 0;
     default:
         return DefWindowProcW(window, message, wparam, lparam);
@@ -368,32 +378,32 @@ bool Initialize() {
         return false;
     }
 
-    if (!PositionIndicator(GetForegroundWindow())) {
-        HWND window = g_indicatorWindow;
-        g_indicatorWindow = nullptr;
-        DestroyWindow(window);
-        UnregisterClassW(kIndicatorClassName, g_instance);
-        g_instance = nullptr;
-        return false;
-    }
-
     return true;
 }
 
 void ShowIndicatorForDeck(HWND deck_window) {
-    if (deck_window != nullptr && IsWindow(deck_window) != FALSE) {
-        PositionIndicator(deck_window);
+    if (deck_window == nullptr ||
+        IsWindow(deck_window) == FALSE ||
+        IsWindowVisible(deck_window) == FALSE) {
+        HideIndicator();
+        return;
+    }
+
+    g_deckWindow = deck_window;
+    if (!PositionIndicator(deck_window)) {
+        HideIndicator();
     }
 }
 
 void HideIndicator() {
-    if (g_indicatorWindow != nullptr && IsWindowVisible(g_indicatorWindow) == FALSE) {
-        PositionIndicator(GetForegroundWindow());
-    }
+    g_deckWindow = nullptr;
+    HideIndicatorWindow();
 }
 
 bool IsIndicatorPoint(POINT point) {
-    if (g_indicatorWindow == nullptr || IsWindowVisible(g_indicatorWindow) == FALSE) {
+    if (g_indicatorWindow == nullptr ||
+        g_deckWindow == nullptr ||
+        IsWindowVisible(g_indicatorWindow) == FALSE) {
         return false;
     }
 
@@ -406,7 +416,7 @@ bool IsIndicatorPoint(POINT point) {
 }
 
 void Shutdown() {
-    HideIndicatorWindow();
+    HideIndicator();
 
     if (g_indicatorWindow != nullptr) {
         DestroyWindow(g_indicatorWindow);

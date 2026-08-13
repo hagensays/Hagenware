@@ -1,33 +1,40 @@
 #include "scanner_window.h"
 
 #include <string>
+#include <vector>
 
+#include "excel_targets.h"
 #include "lifecycle.h"
 
 namespace {
 constexpr wchar_t kClassName[] = L"HagenwareScannerWindow";
 constexpr int kWindowWidth = 640;
 constexpr int kWindowHeight = 420;
-constexpr int kContentPadding = 18;
-constexpr int kTitleTop = 14;
-constexpr int kTitleHeight = 30;
-constexpr int kControlsLeft = 40;
-constexpr int kRowOneTop = 58;
-constexpr int kRowTwoTop = 100;
-constexpr int kRowThreeTop = 142;
+constexpr int kOuterMargin = 24;
+constexpr int kTitleTop = 16;
+constexpr int kTitleHeight = 28;
+constexpr int kRowOneTop = 56;
+constexpr int kRowTwoTop = 96;
+constexpr int kRowThreeTop = 136;
 constexpr int kControlHeight = 28;
-constexpr int kDriveWidth = 76;
 constexpr int kRefreshSize = 28;
-constexpr int kExtensionWidth = 86;
+constexpr int kDriveWidth = 76;
+constexpr int kWorkbookWidth = 180;
+constexpr int kTableWidth = 140;
+constexpr int kOverwriteWidth = 100;
+constexpr int kExportWidth = 112;
 constexpr int kScanButtonWidth = 90;
 constexpr int kControlGap = 8;
 constexpr int kProgressHeight = 18;
-constexpr int kDriveComboId = 1001;
-constexpr int kPathEditId = 1002;
-constexpr int kRefreshButtonId = 1003;
-constexpr int kExportNameEditId = 1004;
-constexpr int kExtensionComboId = 1005;
-constexpr int kScanButtonId = 1006;
+constexpr int kDriveRefreshButtonId = 1001;
+constexpr int kDriveComboId = 1002;
+constexpr int kPathEditId = 1003;
+constexpr int kExcelRefreshButtonId = 1004;
+constexpr int kWorkbookComboId = 1005;
+constexpr int kTableComboId = 1006;
+constexpr int kOverwriteCheckId = 1007;
+constexpr int kExportButtonId = 1008;
+constexpr int kScanButtonId = 1009;
 
 struct NormalizedPath {
     wchar_t drive = L'\0';
@@ -36,11 +43,14 @@ struct NormalizedPath {
 
 HINSTANCE g_instance = nullptr;
 HWND g_window = nullptr;
+HWND g_driveRefreshButton = nullptr;
 HWND g_driveCombo = nullptr;
-HWND g_refreshButton = nullptr;
 HWND g_pathEdit = nullptr;
-HWND g_exportNameEdit = nullptr;
-HWND g_extensionCombo = nullptr;
+HWND g_excelRefreshButton = nullptr;
+HWND g_workbookCombo = nullptr;
+HWND g_tableCombo = nullptr;
+HWND g_overwriteCheck = nullptr;
+HWND g_exportButton = nullptr;
 HWND g_scanButton = nullptr;
 HWND g_anchorWindow = nullptr;
 HFONT g_titleFont = nullptr;
@@ -48,6 +58,8 @@ HFONT g_bodyFont = nullptr;
 WNDPROC g_pathEditOriginalProc = nullptr;
 std::wstring g_normalizedRelativePath;
 wchar_t g_normalizedDrive = L'\0';
+std::vector<ExcelTargets::Workbook> g_excelWorkbooks;
+std::vector<ExcelTargets::Table> g_excelTables;
 bool g_activityActive = false;
 bool g_positionInitialized = false;
 
@@ -84,6 +96,15 @@ wchar_t UpperAscii(wchar_t value) {
         return static_cast<wchar_t>(value - L'a' + L'A');
     }
     return value;
+}
+
+bool SameText(const std::wstring& left, const std::wstring& right) {
+    return CompareStringOrdinal(
+        left.c_str(),
+        static_cast<int>(left.size()),
+        right.c_str(),
+        static_cast<int>(right.size()),
+        TRUE) == CSTR_EQUAL;
 }
 
 std::wstring ReadControlText(HWND control) {
@@ -262,13 +283,111 @@ void ApplyNormalizedPath() {
     RefreshNormalizedPathState();
 }
 
+std::wstring SelectedWorkbookKey() {
+    if (g_workbookCombo == nullptr) {
+        return {};
+    }
+
+    const LRESULT selected = SendMessageW(g_workbookCombo, CB_GETCURSEL, 0, 0);
+    if (selected == CB_ERR) {
+        return {};
+    }
+
+    const size_t index = static_cast<size_t>(selected);
+    if (index >= g_excelWorkbooks.size()) {
+        return {};
+    }
+
+    return g_excelWorkbooks[index].key;
+}
+
+void UpdateExcelControlState() {
+    const bool has_workbook =
+        g_workbookCombo != nullptr &&
+        SendMessageW(g_workbookCombo, CB_GETCURSEL, 0, 0) != CB_ERR;
+    const bool has_table =
+        g_tableCombo != nullptr &&
+        SendMessageW(g_tableCombo, CB_GETCURSEL, 0, 0) != CB_ERR;
+
+    if (g_tableCombo != nullptr) {
+        EnableWindow(g_tableCombo, has_workbook ? TRUE : FALSE);
+    }
+    if (g_overwriteCheck != nullptr) {
+        EnableWindow(g_overwriteCheck, has_table ? TRUE : FALSE);
+    }
+
+    // Export remains disabled until the Scanner produces results to export.
+    if (g_exportButton != nullptr) {
+        EnableWindow(g_exportButton, FALSE);
+    }
+}
+
+void RefreshExcelTables() {
+    if (g_tableCombo == nullptr) {
+        return;
+    }
+
+    SendMessageW(g_tableCombo, CB_RESETCONTENT, 0, 0);
+    g_excelTables.clear();
+
+    const std::wstring workbook_key = SelectedWorkbookKey();
+    if (!workbook_key.empty()) {
+        g_excelTables = ExcelTargets::DetectTables(workbook_key);
+        for (const ExcelTargets::Table& entry : g_excelTables) {
+            SendMessageW(
+                g_tableCombo,
+                CB_ADDSTRING,
+                0,
+                reinterpret_cast<LPARAM>(entry.display.c_str()));
+        }
+
+        if (!g_excelTables.empty()) {
+            SendMessageW(g_tableCombo, CB_SETCURSEL, 0, 0);
+        }
+    }
+
+    UpdateExcelControlState();
+}
+
+void RefreshExcelWorkbooks() {
+    if (g_workbookCombo == nullptr) {
+        return;
+    }
+
+    const std::wstring previous_key = SelectedWorkbookKey();
+    SendMessageW(g_workbookCombo, CB_RESETCONTENT, 0, 0);
+    g_excelWorkbooks = ExcelTargets::DetectWorkbooks();
+
+    int selected_index = -1;
+    for (size_t index = 0; index < g_excelWorkbooks.size(); ++index) {
+        const ExcelTargets::Workbook& entry = g_excelWorkbooks[index];
+        SendMessageW(
+            g_workbookCombo,
+            CB_ADDSTRING,
+            0,
+            reinterpret_cast<LPARAM>(entry.display.c_str()));
+        if (!previous_key.empty() && SameText(previous_key, entry.key)) {
+            selected_index = static_cast<int>(index);
+        }
+    }
+
+    if (selected_index < 0 && !g_excelWorkbooks.empty()) {
+        selected_index = 0;
+    }
+    if (selected_index >= 0) {
+        SendMessageW(g_workbookCombo, CB_SETCURSEL, static_cast<WPARAM>(selected_index), 0);
+    }
+
+    RefreshExcelTables();
+}
+
 RECT ProgressBounds(const RECT& client) {
-    const int left = kControlsLeft + kScanButtonWidth + kControlGap;
+    const int left = kOuterMargin + kScanButtonWidth + kControlGap;
     const int top = kRowThreeTop + (kControlHeight - kProgressHeight) / 2;
     return RECT{
         left,
         top,
-        client.right - kContentPadding,
+        client.right - kOuterMargin,
         top + kProgressHeight};
 }
 
@@ -286,9 +405,9 @@ void PaintWindow(HWND window) {
     HGDIOBJ previous_font = SelectObject(dc, g_titleFont);
 
     RECT title_rect{
-        kContentPadding,
+        kOuterMargin,
         kTitleTop,
-        client.right - kContentPadding,
+        client.right - kOuterMargin,
         kTitleTop + kTitleHeight};
     DrawTextW(
         dc,
@@ -334,8 +453,12 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
         const int control_id = LOWORD(wparam);
         const int notification = HIWORD(wparam);
 
-        if (control_id == kRefreshButtonId && notification == BN_CLICKED) {
+        if (control_id == kDriveRefreshButtonId && notification == BN_CLICKED) {
             RefreshDriveList();
+            return 0;
+        }
+        if (control_id == kExcelRefreshButtonId && notification == BN_CLICKED) {
+            RefreshExcelWorkbooks();
             return 0;
         }
         if (control_id == kPathEditId && notification == EN_CHANGE) {
@@ -344,6 +467,15 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
         }
         if (control_id == kDriveComboId && notification == CBN_SELCHANGE) {
             RefreshNormalizedPathState();
+            return 0;
+        }
+        if (control_id == kWorkbookComboId && notification == CBN_SELCHANGE) {
+            RefreshExcelTables();
+            return 0;
+        }
+        if ((control_id == kTableComboId && notification == CBN_SELCHANGE) ||
+            (control_id == kOverwriteCheckId && notification == BN_CLICKED)) {
+            UpdateExcelControlState();
             return 0;
         }
         break;
@@ -370,11 +502,14 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
         return 0;
     case WM_DESTROY:
         EndActivityIfActive();
+        g_driveRefreshButton = nullptr;
         g_driveCombo = nullptr;
-        g_refreshButton = nullptr;
         g_pathEdit = nullptr;
-        g_exportNameEdit = nullptr;
-        g_extensionCombo = nullptr;
+        g_excelRefreshButton = nullptr;
+        g_workbookCombo = nullptr;
+        g_tableCombo = nullptr;
+        g_overwriteCheck = nullptr;
+        g_exportButton = nullptr;
         g_scanButton = nullptr;
         g_window = nullptr;
         return 0;
@@ -413,18 +548,38 @@ void PositionWindow(HWND anchor_window) {
 }
 
 bool CreateControls() {
-    const int refresh_left = kControlsLeft + kDriveWidth + kControlGap;
-    const int path_left = refresh_left + kRefreshSize + kControlGap;
-    const int path_width = kWindowWidth - path_left - kContentPadding;
-    const int extension_left = kWindowWidth - kContentPadding - kExtensionWidth;
-    const int export_width = extension_left - kControlGap - kControlsLeft;
+    const int drive_left = kOuterMargin + kRefreshSize + kControlGap;
+    const int path_left = drive_left + kDriveWidth + kControlGap;
+    const int path_width = kWindowWidth - path_left - kOuterMargin;
+
+    const int workbook_left = kOuterMargin + kRefreshSize + kControlGap;
+    const int table_left = workbook_left + kWorkbookWidth + kControlGap;
+    const int overwrite_left = table_left + kTableWidth + kControlGap;
+    const int export_left = overwrite_left + kOverwriteWidth + kControlGap;
+
+    g_driveRefreshButton = CreateWindowExW(
+        0,
+        L"BUTTON",
+        L"\x21BB",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+        kOuterMargin,
+        kRowOneTop,
+        kRefreshSize,
+        kRefreshSize,
+        g_window,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kDriveRefreshButtonId)),
+        g_instance,
+        nullptr);
+    if (g_driveRefreshButton == nullptr) {
+        return false;
+    }
 
     g_driveCombo = CreateWindowExW(
         0,
         L"COMBOBOX",
         L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
-        kControlsLeft,
+        drive_left,
         kRowOneTop,
         kDriveWidth,
         220,
@@ -433,23 +588,6 @@ bool CreateControls() {
         g_instance,
         nullptr);
     if (g_driveCombo == nullptr) {
-        return false;
-    }
-
-    g_refreshButton = CreateWindowExW(
-        0,
-        L"BUTTON",
-        L"\x21BB",
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        refresh_left,
-        kRowOneTop,
-        kRefreshSize,
-        kRefreshSize,
-        g_window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kRefreshButtonId)),
-        g_instance,
-        nullptr);
-    if (g_refreshButton == nullptr) {
         return false;
     }
 
@@ -470,37 +608,88 @@ bool CreateControls() {
         return false;
     }
 
-    g_exportNameEdit = CreateWindowExW(
+    g_excelRefreshButton = CreateWindowExW(
         0,
-        L"EDIT",
-        L"",
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL,
-        kControlsLeft,
+        L"BUTTON",
+        L"\x21BB",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+        kOuterMargin,
         kRowTwoTop,
-        export_width,
-        kControlHeight,
+        kRefreshSize,
+        kRefreshSize,
         g_window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kExportNameEditId)),
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kExcelRefreshButtonId)),
         g_instance,
         nullptr);
-    if (g_exportNameEdit == nullptr) {
+    if (g_excelRefreshButton == nullptr) {
         return false;
     }
 
-    g_extensionCombo = CreateWindowExW(
+    g_workbookCombo = CreateWindowExW(
         0,
         L"COMBOBOX",
         L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
-        extension_left,
+        workbook_left,
         kRowTwoTop,
-        kExtensionWidth,
-        180,
+        kWorkbookWidth,
+        220,
         g_window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kExtensionComboId)),
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kWorkbookComboId)),
         g_instance,
         nullptr);
-    if (g_extensionCombo == nullptr) {
+    if (g_workbookCombo == nullptr) {
+        return false;
+    }
+
+    g_tableCombo = CreateWindowExW(
+        0,
+        L"COMBOBOX",
+        L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
+        table_left,
+        kRowTwoTop,
+        kTableWidth,
+        220,
+        g_window,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kTableComboId)),
+        g_instance,
+        nullptr);
+    if (g_tableCombo == nullptr) {
+        return false;
+    }
+
+    g_overwriteCheck = CreateWindowExW(
+        0,
+        L"BUTTON",
+        L"Overwrite?",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+        overwrite_left,
+        kRowTwoTop,
+        kOverwriteWidth,
+        kControlHeight,
+        g_window,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kOverwriteCheckId)),
+        g_instance,
+        nullptr);
+    if (g_overwriteCheck == nullptr) {
+        return false;
+    }
+
+    g_exportButton = CreateWindowExW(
+        0,
+        L"BUTTON",
+        L"Export",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_DISABLED | BS_PUSHBUTTON,
+        export_left,
+        kRowTwoTop,
+        kExportWidth,
+        kControlHeight,
+        g_window,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kExportButtonId)),
+        g_instance,
+        nullptr);
+    if (g_exportButton == nullptr) {
         return false;
     }
 
@@ -509,7 +698,7 @@ bool CreateControls() {
         L"BUTTON",
         L"Scan",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_DISABLED | BS_PUSHBUTTON,
-        kControlsLeft,
+        kOuterMargin,
         kRowThreeTop,
         kScanButtonWidth,
         kControlHeight,
@@ -521,18 +710,19 @@ bool CreateControls() {
         return false;
     }
 
-    SendMessageW(g_driveCombo, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
-    SendMessageW(g_refreshButton, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
-    SendMessageW(g_pathEdit, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
-    SendMessageW(g_exportNameEdit, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
-    SendMessageW(g_extensionCombo, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
-    SendMessageW(g_scanButton, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
-
-    SendMessageW(g_extensionCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"txt"));
-    SendMessageW(g_extensionCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"csv"));
-    SendMessageW(g_extensionCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"xlsx"));
-    SendMessageW(g_extensionCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"xlsm"));
-    SendMessageW(g_extensionCombo, CB_SETCURSEL, 2, 0);
+    HWND controls[] = {
+        g_driveRefreshButton,
+        g_driveCombo,
+        g_pathEdit,
+        g_excelRefreshButton,
+        g_workbookCombo,
+        g_tableCombo,
+        g_overwriteCheck,
+        g_exportButton,
+        g_scanButton};
+    for (HWND control : controls) {
+        SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
+    }
 
     SetLastError(ERROR_SUCCESS);
     const LONG_PTR previous_proc = SetWindowLongPtrW(
@@ -546,6 +736,7 @@ bool CreateControls() {
 
     RefreshDriveList();
     RefreshNormalizedPathState();
+    UpdateExcelControlState();
     return true;
 }
 } // namespace
@@ -561,6 +752,7 @@ bool Initialize(HINSTANCE instance) {
     }
 
     g_instance = instance;
+    ExcelTargets::Initialize();
 
     WNDCLASSW window_class{};
     window_class.lpfnWndProc = WindowProc;
@@ -570,6 +762,7 @@ bool Initialize(HINSTANCE instance) {
     window_class.lpszClassName = kClassName;
 
     if (RegisterClassW(&window_class) == 0) {
+        ExcelTargets::Shutdown();
         g_instance = nullptr;
         return false;
     }
@@ -591,6 +784,7 @@ bool Initialize(HINSTANCE instance) {
         L"Segoe UI");
     if (g_bodyFont == nullptr) {
         UnregisterClassW(kClassName, g_instance);
+        ExcelTargets::Shutdown();
         g_instance = nullptr;
         return false;
     }
@@ -614,6 +808,7 @@ bool Initialize(HINSTANCE instance) {
         DeleteObject(g_bodyFont);
         g_bodyFont = nullptr;
         UnregisterClassW(kClassName, g_instance);
+        ExcelTargets::Shutdown();
         g_instance = nullptr;
         return false;
     }
@@ -638,6 +833,7 @@ bool Initialize(HINSTANCE instance) {
         g_titleFont = nullptr;
         g_bodyFont = nullptr;
         UnregisterClassW(kClassName, g_instance);
+        ExcelTargets::Shutdown();
         g_instance = nullptr;
         return false;
     }
@@ -651,6 +847,7 @@ bool Initialize(HINSTANCE instance) {
         g_bodyFont = nullptr;
         g_pathEditOriginalProc = nullptr;
         UnregisterClassW(kClassName, g_instance);
+        ExcelTargets::Shutdown();
         g_instance = nullptr;
         return false;
     }
@@ -713,16 +910,23 @@ void Shutdown() {
         g_instance = nullptr;
     }
 
+    ExcelTargets::Shutdown();
+
+    g_driveRefreshButton = nullptr;
     g_driveCombo = nullptr;
-    g_refreshButton = nullptr;
     g_pathEdit = nullptr;
-    g_exportNameEdit = nullptr;
-    g_extensionCombo = nullptr;
+    g_excelRefreshButton = nullptr;
+    g_workbookCombo = nullptr;
+    g_tableCombo = nullptr;
+    g_overwriteCheck = nullptr;
+    g_exportButton = nullptr;
     g_scanButton = nullptr;
     g_anchorWindow = nullptr;
     g_pathEditOriginalProc = nullptr;
     g_normalizedRelativePath.clear();
     g_normalizedDrive = L'\0';
+    g_excelWorkbooks.clear();
+    g_excelTables.clear();
     g_positionInitialized = false;
 }
 

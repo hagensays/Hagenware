@@ -15,6 +15,7 @@ HINSTANCE g_module = nullptr;
 HHOOK g_mouseHook = nullptr;
 HWND g_surfaceWindow = nullptr;
 SurfaceKind g_surfaceKind = SurfaceKind::None;
+int g_deckWheelRemainder = 0;
 
 bool IsShiftKey(DWORD virtual_key) {
     return virtual_key == VK_SHIFT || virtual_key == VK_LSHIFT || virtual_key == VK_RSHIFT;
@@ -86,6 +87,7 @@ void StopMouseHook() {
 
     g_surfaceWindow = nullptr;
     g_surfaceKind = SurfaceKind::None;
+    g_deckWheelRemainder = 0;
 }
 
 void DismissSurfaceForPassThrough() {
@@ -97,6 +99,26 @@ void DismissSurfaceForPassThrough() {
     }
 }
 
+bool HandleDeckWheel(const MSLLHOOKSTRUCT& mouse) {
+    if (g_surfaceKind != SurfaceKind::Deck || g_surfaceWindow == nullptr) {
+        return false;
+    }
+
+    g_deckWheelRemainder += GET_WHEEL_DELTA_WPARAM(static_cast<WPARAM>(mouse.mouseData));
+
+    while (g_deckWheelRemainder >= WHEEL_DELTA) {
+        PostMessageW(g_surfaceWindow, WM_KEYDOWN, VK_LEFT, 0);
+        g_deckWheelRemainder -= WHEEL_DELTA;
+    }
+
+    while (g_deckWheelRemainder <= -WHEEL_DELTA) {
+        PostMessageW(g_surfaceWindow, WM_KEYDOWN, VK_RIGHT, 0);
+        g_deckWheelRemainder += WHEEL_DELTA;
+    }
+
+    return true;
+}
+
 LRESULT CALLBACK MouseHookProc(int code, WPARAM wparam, LPARAM lparam) {
     if (code == HC_ACTION &&
         g_surfaceWindow != nullptr &&
@@ -105,6 +127,8 @@ LRESULT CALLBACK MouseHookProc(int code, WPARAM wparam, LPARAM lparam) {
         const auto* mouse = reinterpret_cast<const MSLLHOOKSTRUCT*>(lparam);
         if (!IsPointInsideActiveSurface(mouse->pt)) {
             DismissSurfaceForPassThrough();
+        } else if (wparam == WM_MOUSEWHEEL && HandleDeckWheel(*mouse)) {
+            return 1;
         }
     }
 
